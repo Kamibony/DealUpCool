@@ -23,6 +23,8 @@ from telegram.constants import ParseMode
 
 # --- Importy ---
 from config import TELEGRAM_TOKEN
+
+# Importujeme databázové funkce
 from database import (
     init_db,
     get_db_connection,
@@ -34,7 +36,9 @@ from database import (
     get_participation,
     get_user_active_participations,
 )
-import bot_logic
+
+# Importujeme logiku z nového souboru
+import bot_logic  # <-- DŮLEŽITÝ IMPORT
 
 # --- Logging ---
 logging.basicConfig(
@@ -44,26 +48,29 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # --- Stavy konverzace ---
-ASKING_DATA, PROCESSING_DATA = range(2)
-
+ASKING_DATA, PROCESSING_DATA = range(2)  # 0, 1
 
 # --- Běžné Handlery ---
-# (start, help_command, handle_consent_response, list_calls zůstávají stejné)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Odešle uvítací zprávu a žádost o souhlas."""
     user = update.effective_user
     user_id = user.id
     first_name = user.first_name or "Uživateli"
     username = user.username
     last_name = user.last_name
     logger.info(f"User {user_id} ({username or 'bez @'}) spustil /start.")
+
     if not add_or_update_user(user_id, first_name, last_name, username):
         await update.message.reply_text("Omlouvám se, nastala interní chyba.")
         return ConversationHandler.END
+
     welcome_message = (
         f"Ahoj {first_name}! Vítej v DealUpBotu.\n\n"
-        + "Pomáhám lidem spojit se pro kolektivní nákupy ('Výzvy') a získat tak lepší ceny.\n\n"
-        + "Než začneme, potřebuji tvůj **souhlas se zpracováním údajů** (Telegram ID, jméno) "
-        + "a **zasíláním nabídek** ('Výzev'). Souhlasíš?"
+        "Pomáhám lidem spojit se pro kolektivní nákupy ('Výzvy') a získat tak lepší ceny.\n\n"
+        "Než začneme, potřebuji tvůj **souhlas se zpracováním údajů** (Telegram ID, jméno) "
+        "a **zasíláním nabídek** ('Výzev'). Souhlasíš?"
     )
     reply_keyboard = [
         [KeyboardButton("Ano, souhlasím 👍")],
@@ -79,14 +86,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Odešle nápovědu jako prostý text."""
     help_text = (
         "Jsem DealUpBot a pomohu ti s kolektivními nákupy ('Výzvami').\n\n"
-        + "Základní příkazy:\n"
-        + "/start - Úvod a udělení souhlasu.\n"
-        + "/vyzvy - Zobrazí aktuální aktivní Výzvy.\n"
-        + "/zrusit_ucast - Umožní zrušit tvou účast v aktivní Výzvě.\n"
-        + "/help - Zobrazí tuto nápovědu.\n"
-        + "/cancel - Zruší aktuálně probíhající akci (např. sběr údajů).\n"
+        "Základní příkazy:\n"
+        "/start - Úvod a udělení souhlasu.\n"
+        "/vyzvy - Zobrazí aktuální aktivní Výzvy.\n"
+        "/zrusit_ucast - Umožní zrušit tvou účast v aktivní Výzvě.\n"
+        "/help - Zobrazí tuto nápovědu.\n"
+        "/cancel - Zruší aktuálně probíhající akci (např. sběr údajů).\n"
     )
     await update.message.reply_text(help_text)
 
@@ -94,12 +102,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def handle_consent_response(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
+    """Zpracuje odpověď na souhlas."""
     user_id = update.effective_user.id
     response = update.message.text
     logger.info(f"User {user_id} odpověděl na souhlas: {response}")
     new_consent_status = "pending"
     reply_text = ""
     show_calls_after = False
+
     if "Ano, souhlasím" in response:
         new_consent_status = "granted"
         reply_text = "Děkuji za souhlas! 🎉 Nyní ti mohu zasílat zajímavé 'Výzvy'."
@@ -107,9 +117,11 @@ async def handle_consent_response(
     elif "Ne, děkuji" in response:
         new_consent_status = "denied"
         reply_text = "Rozumím. Nebudu ti tedy zasílat žádné nabídky..."
+
     if update_user_consent(user_id, new_consent_status):
         await update.message.reply_text(reply_text, reply_markup=ReplyKeyboardRemove())
-        await list_calls(update, context) if show_calls_after else None
+        if show_calls_after:
+            await list_calls(update, context)
     else:
         await update.message.reply_text(
             "Chyba při ukládání volby.", reply_markup=ReplyKeyboardRemove()
@@ -117,14 +129,21 @@ async def handle_consent_response(
 
 
 async def list_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Zobrazí seznam aktivních Výzev s inline tlačítky."""
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     logger.info(f"User {user_id} spouští zobrazení výzev.")
+
+    # TODO: Zkontrolovat consent_status=='granted' zde!
+
     active_calls = get_active_calls()
+
+    # !! REFAKTORING: Použijeme funkci z bot_logic pro sestavení textu !!
     message_text = bot_logic.format_calls_list_message(active_calls)
+
     keyboard = []
     reply_markup = None
-    if active_calls:
+    if active_calls:  # Tlačítka přidáme jen pokud jsou výzvy
         for call in active_calls:
             try:
                 button = InlineKeyboardButton(
@@ -140,9 +159,13 @@ async def list_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 logger.error(
                     f"Neočekávaná chyba při tvorbě tlačítka pro list_calls: {e}"
                 )
+
         if keyboard:
             reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Odešleme zprávu
     try:
+        # Použijeme Markdown, formátování je nyní v bot_logic
         await context.bot.send_message(
             chat_id=chat_id,
             text=message_text,
@@ -153,54 +176,65 @@ async def list_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         logger.warning(
             f"Nepodařilo se poslat list_calls s Markdown: {md_error}. Posílám jako prostý text."
         )
-        plain_text = message_text.replace("*", "").replace("~", "").replace(r"\.", ".")
+        plain_text = (
+            message_text.replace("*", "").replace("~", "").replace(r"\.", ".")
+        )  # Základní odstranění Markdown
         await context.bot.send_message(
             chat_id=chat_id, text=plain_text, reply_markup=reply_markup
         )
 
 
-# --- ConversationHandler a související funkce ---
+# --- ConversationHandler pro sběr dat (začátek) ---
 
 
+# !! REFAKTORING: Tato funkce nyní volá bot_logic.process_call_selection !!
 async def handle_call_selection(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int | None:
-    """Zpracuje výběr Výzvy."""
+    """
+    Zpracuje výběr Výzvy (CallbackQuery) zavoláním logiky z bot_logic.
+    Nastaví user_data a vrátí další stav pro ConversationHandler podle výsledku.
+    """
     query = update.callback_query
-    await query.answer()
+    await query.answer()  # Potvrdíme Telegramu příjem rychle
     callback_data = query.data
-    user = update.effective_user  # Získáme celý user objekt
+    user = update.effective_user
     user_id = user.id
-    first_name = user.first_name or "Uživateli"  # Použijeme jméno
+    first_name = user.first_name or "Uživateli"
     logger.info(f"HANDLER: User {user_id} stiskl tlačítko: {callback_data}")
 
     if not callback_data.startswith("call_"):
         logger.warning(
             f"HANDLER: User {user_id} poslal neočekávaný callback (ne call_): {callback_data}"
         )
-        return None
+        return None  # Tento callback není pro nás
 
     try:
         call_id = int(callback_data.split("_")[1])
-        result = bot_logic.process_call_selection(
-            user_id, call_id, first_name
-        )  # Předáme i jméno
-        next_state = ConversationHandler.END
 
+        # Zavoláme funkci z bot_logic, která obsahuje všechnu logiku
+        result = bot_logic.process_call_selection(user_id, call_id, first_name)
+
+        next_state = ConversationHandler.END  # Výchozí je ukončení
+
+        # Zpracujeme výsledek z bot_logic
         if result["status"] == "error" or result["status"] == "info":
+            # Zobrazíme chybovou nebo informační zprávu a ukončíme konverzaci
             await query.edit_message_text(
                 text=result["message"], reply_markup=None, parse_mode=ParseMode.MARKDOWN
             )
+            # next_state zůstává END
 
         elif result["status"] == "ok":
             final_message = result["message"]  # Zpráva z bot_logic
-            # !! Krok C.3: Pokud není potřeba sběr dat, naformátujeme zde !!
             state_code = result.get("next_state")
+
+            # Pokud nezačíná sběr dat, naformátujeme finální zprávu zde
             if state_code == -1:  # Končíme (účast potvrzena bez dat)
-                # Potřebujeme detaily pro formátování
-                call_details = get_call_details(call_id)
+                call_details = get_call_details(
+                    call_id
+                )  # Potřebujeme detaily pro formátování
                 if call_details:
-                    # Připravíme data pro formátování
                     format_data = {
                         "user_first_name": first_name,
                         "user_id": user_id,
@@ -208,45 +242,35 @@ async def handle_call_selection(
                         "deal_price": call_details.get("deal_price", "N/A"),
                         "call_id": call_id,
                     }
-                    # Získáme šablonu instrukcí
                     instruction_template = (
                         call_details.get("final_instructions")
                         or "Účast potvrzena! Další instrukce brzy."
                     )
                     try:
-                        # Naformátujeme instrukce a celou zprávu
-                        formatted_instructions = instruction_template.format(
-                            **format_data
-                        )
-                        base_message = f"Skvělé, {first_name}! Účast ve Výzvě *{format_data['call_name']}* potvrzena!\n\n"
-                        final_message = (
-                            base_message + formatted_instructions
-                        )  # Použijeme zprávu pro potvrzení
+                        final_message = f"Skvělé, {first_name}! Účast ve Výzvě *{format_data['call_name']}* potvrzena!\n\n{instruction_template.format(**format_data)}"
                     except KeyError as e:
                         logger.error(
-                            f"Chybějící klíč '{e}' při formátování final_instructions pro call_id {call_id} (no data needed). Používám původní zprávu."
+                            f"Chybějící klíč '{e}' při formátování final_instructions pro call_id {call_id} (no data needed). Používám základní zprávu."
                         )
-                        # Pokud formátování selže, pošleme alespoň základní zprávu
-                        final_message = result[
-                            "message"
-                        ]  # V tomto případě je to potvrzení bez instrukcí
-                else:
-                    # Pokud selže načtení detailů, pošleme základní zprávu
-                    final_message = result["message"]
+                        # final_message zůstane z result['message'], což je potvrzení bez instrukcí
 
             # Upravíme původní zprávu (buď potvrzení zájmu nebo finální potvrzení)
             await query.edit_message_text(
                 text=final_message, reply_markup=None, parse_mode=ParseMode.MARKDOWN
             )
 
-            # Aktualizace user_data a určení dalšího stavu (jako předtím)
+            # Aktualizace user_data, pokud je potřeba (pro start sběru dat)
             if "user_data_updates" in result:
                 context.user_data.update(result["user_data_updates"])
 
+            # Vrácení dalšího stavu
             if state_code == ASKING_DATA:  # 0
+                # Zavoláme funkci pro položení první otázky
+                # Ta pak sama vrátí stav PROCESSING_DATA
                 return await ask_next_data(update, context)
             else:  # state_code je -1 nebo None
                 next_state = ConversationHandler.END
+                # Vyčistíme user_data pro jistotu
                 for key in list(context.user_data.keys()):
                     if key.startswith("current_") or key in [
                         "data_needed_list",
@@ -286,10 +310,11 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     user_data = context.user_data
     needed_list = user_data.get("data_needed_list", [])
     current_index = user_data.get("data_needed_index", 0)
+    # Potřebujeme chat_id - zkusíme získat z různých míst v update objektu
     chat_id = (
         update.effective_chat.id
         if update.effective_chat
-        else update.callback_query.message.chat_id
+        else (update.callback_query.message.chat_id if update.callback_query else None)
     )
     if not chat_id:
         logger.error("Nemohu získat chat_id v ask_next_data")
@@ -297,7 +322,7 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     if current_index >= len(needed_list):
         # --- Všechna data shromážděna ---
-        user = update.effective_user  # Získáme info o uživateli
+        user = update.effective_user
         user_id = user.id
         first_name = user.first_name or "Uživateli"
         call_id = user_data.get("current_call_id")
@@ -308,7 +333,6 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         instruction_template = "Další instrukce brzy."  # Default
         call_name = f"Výzva ID {call_id}"
         deal_price = "N/A"
-
         if call_details:
             try:
                 call_name = call_details["name"] or call_name
@@ -341,9 +365,10 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 "call_name": call_name,
                 "deal_price": deal_price,
                 "call_id": call_id,
-                # Můžeme přidat i collected_data, pokud by placeholdery potřebovaly např. email
-                # **collected_data # Rozbalí slovník, ale pozor na kolize klíčů
             }
+            # Můžeme přidat i nasbíraná data, pokud by byla potřeba v instrukcích
+            format_data.update(collected_data)
+
             # !! Krok C.3: Naformátujeme instrukce !!
             try:
                 formatted_instructions = instruction_template.format(**format_data)
@@ -363,7 +388,7 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 confirmation_message += (
                     f"- {key.replace('_', ' ').capitalize()}: {value}\n"
                 )
-            confirmation_message += f"\n**Další kroky:**\n{formatted_instructions}"  # Použijeme naformátované instrukce
+            confirmation_message += f"\n**Další kroky:**\n{formatted_instructions}"
 
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -375,7 +400,8 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 chat_id=chat_id, text="Chyba při ukládání údajů."
             )
 
-        for key in list(user_data.keys()):  # Vyčistíme user_data
+        # Vyčistíme user_data
+        for key in list(user_data.keys()):
             if key.startswith("current_") or key in [
                 "data_needed_list",
                 "data_needed_index",
@@ -403,7 +429,7 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def process_data_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # (kód process_data_input zůstává stejný)
+    """Zpracuje a validuje odpověď uživatele."""
     user_data = context.user_data
     user_input = update.message.text
     user_id = update.effective_user.id
@@ -412,10 +438,12 @@ async def process_data_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.warning(f"User {user_id} poslal '{user_input}', ale nečekal se údaj.")
         return PROCESSING_DATA
     logger.info(f"User {user_id} zadal údaj '{user_input}' pro '{current_key}'")
+
     is_valid = True
     error_message = ""
     processed_input = user_input.strip()
     key_lower = current_key.lower()
+    # Validace (zůstává stejná)
     if key_lower == "počet kusů":
         if not processed_input.isdigit() or int(processed_input) <= 0:
             is_valid = False
@@ -443,9 +471,11 @@ async def process_data_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if len(processed_input) < 10:
             is_valid = False
             error_message = "Adresa je příliš krátká. Zadej ji prosím znovu:"
+
     if not is_valid:
         await update.message.reply_text(error_message)
         return PROCESSING_DATA
+
     user_data.setdefault("collected_data_so_far", {})[current_key] = processed_input
     user_data["data_needed_index"] = user_data.get("data_needed_index", 0) + 1
     user_data.pop("current_data_key", None)
@@ -455,7 +485,7 @@ async def process_data_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cancel_conversation(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    # (kód cancel_conversation zůstává stejný)
+    """Ukončí ConversationHandler."""
     user = update.effective_user
     user_data = context.user_data
     call_id = user_data.get("current_call_id")
@@ -603,8 +633,8 @@ def main() -> None:
         name="call_data_collection",
     )
 
-    application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("start", start))
+    application.add_handler(conv_handler)  # 1. Conversation Handler
+    application.add_handler(CommandHandler("start", start))  # 2. Příkazy
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("vyzvy", list_calls))
     application.add_handler(CommandHandler("zrusit_ucast", cancel_participation_start))
@@ -612,13 +642,13 @@ def main() -> None:
         MessageHandler(
             filters.Regex("^(Ano, souhlasím 👍|Ne, děkuji)$"), handle_consent_response
         )
-    )
+    )  # 3. Specifický text
     application.add_handler(
         CallbackQueryHandler(handle_cancel_selection, pattern="^cancel_")
-    )
+    )  # 4. Další Callbacks
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unknown_message)
-    )
+    )  # 5. Neznámý text
 
     logger.info("Spouštím bota (polling)...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
