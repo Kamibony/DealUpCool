@@ -1,0 +1,50 @@
+[
+    {
+      "name": "Bedýnka BIO zeleniny (JSON)",
+      "description": "Čerstvá sezónní zelenina od našeho partnera.",
+      "original_price": 450.0,
+      "deal_price": 310.0,
+      "status": "active",
+      "data_needed": "adresa doručení, telefonní číslo",
+      "image_url": null,
+      "start_at": null,
+      "end_at": null,
+      "final_instructions": "Děkujeme, {user_first_name}! Zeleninu doručíme na vaši adresu do 3 pracovních dnů. Budeme vás kontaktovat ohledně platby (VS: {user_id}). Výzva: {call_name}."
+    },
+    {
+      "name": "Voucher 2+1 káva zdarma (JSON)",
+      "description": "Při koupi 2 káv v Kavárně Pohoda dostanete třetí zdarma.",
+      "original_price": 270.0,
+      "deal_price": 180.0,
+      "status": "active",
+      "data_needed": null,
+      "image_url": null,
+      "start_at": null,
+      "end_at": null,
+      "final_instructions": "Váš voucher je připraven, {user_first_name}! Ukažte tuto zprávu obsluze v Kavárně Pohoda. Cena k úhradě: {deal_price} Kč."
+    },
+    {
+      "name": "Lístky do kina (JSON)",
+      "description": "Zlevněné lístky na večerní představení.",
+      "original_price": 220.0,
+      "deal_price": 150.0,
+      "status": "active",
+      "data_needed": "email",
+      "image_url": null,
+      "start_at": null,
+      "end_at": null,
+      "final_instructions": "Vstupenky pro výzvu '{call_name}' vám byly zaslány na zadaný email. Vaše ID účasti: {user_id}-{call_id}."
+    },
+    {
+      "name": "Neaktivní výzva (JSON)",
+      "description": "Tato by se neměla zobrazit.",
+      "original_price": null,
+      "deal_price": 50.0,
+      "status": "closed",
+      "data_needed": null,
+      "image_url": null,
+      "start_at": null,
+      "end_at": null,
+      "final_instructions": null
+    }
+  ]

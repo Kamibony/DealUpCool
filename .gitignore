@@ -1,0 +1,27 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+.env
+
+# SQLite Database
+*.sqlite3
+*.db
+*.db-journal
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and OS specific files (optional but recommended)
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Sensitive configuration (already handled by not committing .env)
+# .env
+
+# Log files
+*.log
