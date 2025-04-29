@@ -19,36 +19,43 @@ def format_calls_list_message(active_calls):
     message_parts = ["Zde jsou aktuální aktivní Výzvy:\n"]
     for call in active_calls:
         try:
-            call_id = call["call_id"]
+            # Přístup k datům (objekt sqlite3.Row se chová podobně jako slovník)
+            call_id = call["call_id"]  # Pro logování chyb
             name = call["name"]
-            description = call["description"] or ""
+            description = call["description"] or ""  # Ošetření None
             original_price = call["original_price"]
             deal_price = call["deal_price"]
 
+            # Formátování ceny (ošetření None)
+            # OPRAVA: Odstraněno problematické '.replace('.', r'\.')' z f-stringu
             original_price_str = (
-                f"~{str(original_price).replace('.', r'\.')} Kč~"
-                if original_price is not None
-                else ""
+                f"~{str(original_price)} Kč~" if original_price is not None else ""
             )
-            deal_price_str = str(deal_price).replace(".", r"\.")
+            deal_price_str = str(deal_price)  # Použijeme prostý string
 
             message_parts.append(
                 f"\n*{name}*\n"
                 f"{description}\n"
+                # Použijeme opravené proměnné
                 f"Cena: {original_price_str} -> *{deal_price_str} Kč*\n"
                 f"--------------------"
             )
         except KeyError as e:
+            # Použijeme bezpečný přístup .get() pro logování, pokud by 'call' nebyl Row objekt
+            log_call_id = (
+                call.get("call_id", "?") if isinstance(call, dict) else call["call_id"]
+            )
             logger.error(
-                f"Chybějící klíč '{e}' ve 'call' datech při formátování výzvy ID {call.get('call_id', '?') if isinstance(call, dict) else 'N/A'}"
+                f"Chybějící klíč '{e}' ve 'call' datech při formátování výzvy ID {log_call_id}"
             )
             message_parts.append(
                 f"\n*Chyba při načítání detailů výzvy*\n--------------------"
             )
         except Exception as e:
-            logger.error(
-                f"Neočekávaná chyba při formátování výzvy {call.get('call_id', '?') if isinstance(call, dict) else 'N/A'}: {e}"
+            log_call_id = (
+                call.get("call_id", "?") if isinstance(call, dict) else call["call_id"]
             )
+            logger.error(f"Neočekávaná chyba při formátování výzvy {log_call_id}: {e}")
             message_parts.append(
                 f"\n*Chyba při načítání detailů výzvy*\n--------------------"
             )
@@ -64,7 +71,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
     Vrací slovník s klíči:
         'status': 'ok' / 'info' / 'error'
         'message': Text zprávy pro uživatele (pro editaci nebo odeslání)
-        'next_state': Další stav pro ConversationHandler (None pokud končí)
+        'next_state': Další stav pro ConversationHandler (0=ASKING_DATA, -1=END, None=nechat být)
         'user_data_updates': Slovník s daty pro aktualizaci context.user_data (volitelné)
     """
     logger.info(f"BOT_LOGIC: Zpracovávám výběr výzvy {call_id} pro uživatele {user_id}")
@@ -77,7 +84,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
         return {
             "status": "error",
             "message": f"Výzva '{call_name}' již není aktivní nebo neexistuje.",
-            "next_state": -1,  # Použijeme -1 pro ConversationHandler.END
+            "next_state": -1,  # ConversationHandler.END
         }
 
     # Kontrola existující účasti
@@ -97,7 +104,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
             "next_state": -1,
         }
 
-    # Kontrola, zda jsou potřeba data
+    # Kontrola, zda jsou potřeba data (s bezpečným přístupem)
     data_needed_str = None
     try:
         data_needed_str = call_details["data_needed"]
@@ -130,13 +137,17 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
                         f"Sloupec 'final_instructions' chybí pro call_id {call_id}."
                     )
 
+            # Zde NEVOLÁME add_or_update_participation znovu, jen vracíme zprávu a stav
+            # Stav na 'confirmed' se nastaví v handleru po úspěšném odeslání zprávy, nebo zde?
+            # Pro zjednodušení to můžeme udělat zde, pokud DB operace selže, vrátíme error.
             if add_or_update_participation(
                 user_id, call_id, status="confirmed", collected_data={}
             ):
                 return {
                     "status": "ok",
+                    # Použijeme f-string pro vložení proměnných do výsledné zprávy
                     "message": f"Skvělé, {user_first_name}! Účast ve Výzvě *{call_name}* potvrzena!\n\n{final_instructions}",
-                    "next_state": -1,  # ConversationHandler.END
+                    "next_state": -1,
                 }
             else:
                 return {
@@ -160,7 +171,10 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
             return {
                 "status": "ok",
                 "message": f"Super! Zájem o *{call_name}* zaznamenán.\nNyní potřebuji pár údajů. Pro zrušení napiš /cancel.",
-                "next_state": 0,  # ASKING_DATA (nebo který stav použijeme jako první)
+                # Vracíme číselný stav, který odpovídá ASKING_DATA definovanému v bot.py
+                # Technicky vzato, další krok je položit otázku, což udělá ask_next_data,
+                # takže můžeme vrátit 0 (ASKING_DATA) jako signál ke spuštění této funkce.
+                "next_state": 0,  # 0 odpovídá ASKING_DATA
                 "user_data_updates": user_data_updates,
             }
 
@@ -187,7 +201,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
             return {
                 "status": "ok",
                 "message": f"Skvělé, {user_first_name}! Účast ve Výzvě *{call_name}* potvrzena!\n\n{final_instructions}",
-                "next_state": -1,  # ConversationHandler.END
+                "next_state": -1,
             }
         else:
             return {
@@ -198,4 +212,3 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
 
 
 # --- Zde budeme přidávat další logické funkce ---
-# Např. pro validaci, formátování finálních kroků atd.
