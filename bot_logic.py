@@ -1,6 +1,6 @@
 # bot_logic.py
 import logging
-from telegram.constants import ParseMode  # Může se hodit pro formátování
+from telegram.constants import ParseMode
 
 # Importujeme databázové funkce
 from database import get_call_details, get_participation, add_or_update_participation
@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 def format_calls_list_message(active_calls):
     """Sestaví text zprávy se seznamem aktivních výzev."""
-    # (Tato funkce zůstává stejná jako v předchozí verzi - s opravou SyntaxError)
     if not active_calls:
         return "Momentálně nejsou k dispozici žádné aktivní Výzvy."
     message_parts = ["Zde jsou aktuální aktivní Výzvy:\n"]
@@ -30,14 +29,14 @@ def format_calls_list_message(active_calls):
             )
         except KeyError as e:
             logger.error(
-                f"Chybějící klíč '{e}' ve 'call' datech při formátování výzvy ID {call.get('call_id', '?') if isinstance(call, dict) else call['call_id']}"
+                f"Chybějící klíč '{e}' ve 'call' datech ID {call.get('call_id', '?') if isinstance(call, dict) else call['call_id']}"
             )
             message_parts.append(
                 f"\n*Chyba při načítání detailů výzvy*\n--------------------"
             )
         except Exception as e:
             logger.error(
-                f"Neočekávaná chyba při formátování výzvy {call.get('call_id', '?') if isinstance(call, dict) else call['call_id']}: {e}"
+                f"Neočekávaná chyba formátování výzvy {call.get('call_id', '?') if isinstance(call, dict) else call['call_id']}: {e}"
             )
             message_parts.append(
                 f"\n*Chyba při načítání detailů výzvy*\n--------------------"
@@ -46,12 +45,18 @@ def format_calls_list_message(active_calls):
 
 
 def process_call_selection(user_id: int, call_id: int, user_first_name: str):
-    """Zpracuje logiku po výběru výzvy uživatelem."""
+    """Zpracuje logiku po výběru výzvy uživatelem (s opravou přístupu k details)."""
     logger.info(f"BOT_LOGIC: Zpracovávám výběr výzvy {call_id} pro uživatele {user_id}")
     call_details = get_call_details(call_id)
+    call_name = f"Výzva ID {call_id}"  # Defaultní jméno pro případ chyby
+
+    if call_details:  # Bezpečné načtení jména, pokud detaily existují
+        try:
+            call_name = call_details["name"] or call_name
+        except IndexError:
+            logger.warning(f"Sloupec 'name' chybí pro call_id {call_id}.")
 
     if not call_details or call_details["status"] != "active":
-        call_name = call_details["name"] if call_details else f"ID {call_id}"
         return {
             "status": "error",
             "message": f"Výzva '{call_name}' již není aktivní nebo neexistuje.",
@@ -62,7 +67,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
     if participation and participation["status"] not in ["interested", "cancelled"]:
         return {
             "status": "info",
-            "message": f"V této Výzvě ('{call_details['name']}') již máš zaznamenanou účast (stav: {participation['status']}). Pro zrušení použij /zrusit_ucast.",
+            "message": f"V této Výzvě ('{call_name}') již máš zaznamenanou účast (stav: {participation['status']}). Pro zrušení použij /zrusit_ucast.",
             "next_state": -1,
         }
 
@@ -74,15 +79,10 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
         }
 
     data_needed_str = None
-    call_name = f"Výzva ID {call_id}"
     final_instructions = "Další instrukce brzy."
     deal_price_str = "N/A"
-    # Bezpečné načtení klíčových hodnot z call_details
+    # Bezpečné načtení potřebných detailů
     if call_details:
-        try:
-            call_name = call_details["name"] or call_name
-        except IndexError:
-            pass
         try:
             data_needed_str = call_details["data_needed"]
         except IndexError:
@@ -94,9 +94,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
         except IndexError:
             logger.warning(f"Sloupec 'final_instructions' chybí pro call_id {call_id}.")
         try:
-            deal_price_str = str(
-                call_details["deal_price"]
-            )  # Pro formátování finální zprávy
+            deal_price_str = str(call_details["deal_price"])
         except IndexError:
             pass
 
@@ -112,7 +110,6 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
             if add_or_update_participation(
                 user_id, call_id, status="confirmed", collected_data={}
             ):
-                # Formátování zprávy s použitím načtených hodnot
                 format_data = {
                     "user_first_name": user_first_name,
                     "user_id": user_id,
@@ -124,7 +121,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
                     formatted_instructions = final_instructions.format(**format_data)
                 except KeyError as e:
                     logger.error(
-                        f"Chybějící klíč '{e}' při formátování final_instructions (no data needed)."
+                        f"Chybějící klíč '{e}' při formátování final_instructions (no data)."
                     )
                     formatted_instructions = final_instructions
                 except Exception as e:
@@ -132,7 +129,8 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
                     formatted_instructions = final_instructions
                 return {
                     "status": "ok",
-                    "message": f"Skvělé, {user_first_name}! Účast ve Výzvě '{call_name}' potvrzena!\n\n{formatted_instructions}",  # Používáme ' místo *
+                    # Posíláme jako prostý text (bez parse_mode), odstraněno formátování *
+                    "message": f"Skvělé, {user_first_name}! Účast ve Výzvě '{call_name}' potvrzena!\n\n{formatted_instructions}",
                     "next_state": -1,
                 }
             else:
@@ -142,7 +140,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
                     "next_state": -1,
                 }
         else:
-            # Data jsou potřeba -> připravit data pro ConversationHandler
+            # Data jsou potřeba
             user_data_updates = {
                 "current_call_id": call_id,
                 "data_needed_list": data_needed_list,
@@ -174,7 +172,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
                 formatted_instructions = final_instructions.format(**format_data)
             except KeyError as e:
                 logger.error(
-                    f"Chybějící klíč '{e}' při formátování final_instructions (no data needed fallback)."
+                    f"Chybějící klíč '{e}' při formátování final_instructions (no data fallback)."
                 )
                 formatted_instructions = final_instructions
             except Exception as e:
@@ -182,7 +180,8 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
                 formatted_instructions = final_instructions
             return {
                 "status": "ok",
-                "message": f"Skvělé, {user_first_name}! Účast ve Výzvě '{call_name}' potvrzena!\n\n{formatted_instructions}",  # Používáme ' místo *
+                # Posíláme jako prostý text (bez parse_mode)
+                "message": f"Skvělé, {user_first_name}! Účast ve Výzvě '{call_name}' potvrzena!\n\n{formatted_instructions}",
                 "next_state": -1,
             }
         else:
