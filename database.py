@@ -3,14 +3,25 @@ import sqlite3
 import datetime
 import logging
 import json
+import os  # <-- Přidán import os
 
+# --- Určení absolutní cesty k databázi ---
+# Získáme adresář, ve kterém se nachází tento soubor (database.py)
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Sestavíme absolutní cestu k souboru databáze v tomto adresáři
+DATABASE_FILE = os.path.join(_BASE_DIR, "database.sqlite3")
+
+# Nastavení loggeru (až po definici cesty, pokud bychom chtěli logovat i cestu)
 logger = logging.getLogger(__name__)
-DATABASE_FILE = "database.sqlite3"
+# Logování cesty pro kontrolu při startu (můžete později smazat)
+logger.info(f"Database path set to: {DATABASE_FILE}")
+# -----------------------------------------
 
 
 def get_db_connection():
     """Vytvoří a vrátí spojení s databází."""
     try:
+        # Používáme absolutní cestu definovanou výše
         conn = sqlite3.connect(DATABASE_FILE)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA encoding = 'UTF-8'")
@@ -43,7 +54,7 @@ def init_db():
         )
         logger.info("Tabulka 'users' zkontrolována/vytvořena.")
 
-        # Tabulka Calls (Výzvy) - S NOVÝM SLOUPCEM final_instructions
+        # Tabulka Calls (Výzvy)
         cursor.execute(
             """
         CREATE TABLE IF NOT EXISTS calls (
@@ -52,12 +63,12 @@ def init_db():
             description TEXT,
             original_price REAL,
             deal_price REAL NOT NULL,
-            status TEXT DEFAULT 'active', -- 'active', 'upcoming', 'closed', 'cancelled'
-            data_needed TEXT,           -- Popis dat, např. 'adresa, počet kusů' nebo JSON '["address", "quantity"]'
+            status TEXT DEFAULT 'active',
+            data_needed TEXT,
             image_url TEXT,
             start_at DATETIME,
             end_at DATETIME,
-            final_instructions TEXT, -- <<< ZDE JE NOVÝ SLOUPEC
+            final_instructions TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -71,8 +82,8 @@ def init_db():
             participation_id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             call_id INTEGER NOT NULL,
-            status TEXT DEFAULT 'interested', -- 'interested', 'data_collected', 'confirmed', 'cancelled'
-            collected_data TEXT,             -- Shromážděná data uložená jako JSON text
+            status TEXT DEFAULT 'interested',
+            collected_data TEXT,
             participation_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (telegram_id) ON DELETE CASCADE,
             FOREIGN KEY (call_id) REFERENCES calls (call_id) ON DELETE CASCADE,
@@ -99,9 +110,18 @@ def get_active_calls():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT call_id, name, description, original_price, deal_price FROM calls WHERE status = 'active' ORDER BY created_at DESC"
+            """
+            SELECT call_id, name, description, original_price, deal_price
+            FROM calls
+            WHERE status = 'active'
+            ORDER BY created_at DESC
+        """
         )
         calls = cursor.fetchall()
+        # Přidán debug log z minula pro kontrolu
+        logger.info(
+            f"DEBUG get_active_calls: Načteno řádků: {len(calls)}. První řádek (pokud existuje): {dict(calls[0]) if calls else 'Žádný'}"
+        )
         conn.close()
         return calls
     except sqlite3.Error as e:
@@ -194,7 +214,6 @@ def add_or_update_participation(
                 f"Chyba při převodu collected_data na JSON pro user {user_id}, call {call_id}: {e}"
             )
             return False
-    # Pokud je status 'cancelled', data_json zůstane None (nebo se v DB nastaví na NULL)
 
     try:
         conn = get_db_connection()
