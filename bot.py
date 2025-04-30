@@ -34,8 +34,9 @@ logger = logging.getLogger(__name__)
 ASKING_DATA, PROCESSING_DATA = range(2)
 
 # --- Běžné Handlery ---
-# Funkce start, help_command, handle_consent_response, list_calls zůstávají stejné
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    # (kód start funkce zůstává stejný)
     user = update.effective_user; user_id = user.id; first_name = user.first_name or "Uživateli"; username = user.username; last_name = user.last_name
     logger.info(f"User {user_id} ({username or 'bez @'}) spustil /start.")
     if not add_or_update_user(user_id, first_name, last_name, username): await update.message.reply_text("Omlouvám se, nastala interní chyba."); return ConversationHandler.END
@@ -46,10 +47,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # (kód help funkce zůstává stejný)
     help_text = ("Jsem DealUpBot a pomohu ti s kolektivními nákupy ('Výzvami').\n\n" + "Základní příkazy:\n" + "/start - Úvod a udělení souhlasu.\n" + "/vyzvy - Zobrazí aktuální aktivní Výzvy.\n" + "/zrusit_ucast - Umožní zrušit tvou účast v aktivní Výzvě.\n" + "/moje_ucasti - Zobrazí tvé aktivní účasti.\n" + "/help - Zobrazí tuto nápovědu.\n" + "/cancel - Zruší aktuálně probíhající akci (např. sběr údajů).\n")
     await update.message.reply_text(help_text)
 
 async def handle_consent_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # (kód handle_consent_response zůstává stejný)
     user_id = update.effective_user.id; response = update.message.text
     logger.info(f"User {user_id} odpověděl na souhlas: {response}")
     new_consent_status = 'pending'; reply_text = ""; show_calls_after = False
@@ -59,6 +62,7 @@ async def handle_consent_response(update: Update, context: ContextTypes.DEFAULT_
     else: await update.message.reply_text("Chyba při ukládání volby.", reply_markup=ReplyKeyboardRemove())
 
 async def list_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # (kód list_calls zůstává stejný)
     user_id = update.effective_user.id; chat_id = update.effective_chat.id
     logger.info(f"User {user_id} spouští zobrazení výzev.")
     active_calls = get_active_calls()
@@ -189,6 +193,7 @@ async def handle_cancel_selection(update: Update, context: ContextTypes.DEFAULT_
 
 
 # --- Handler pro /moje_ucasti ---
+# !! OPRAVA PŘÍSTUPU K DATŮM Z DB !!
 async def my_participations_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Zobrazí uživateli jeho aktivní účasti."""
     user_id = update.effective_user.id
@@ -202,10 +207,12 @@ async def my_participations_command(update: Update, context: ContextTypes.DEFAUL
 
     message_parts = ["Tvé aktuální aktivní účasti:\n"]
     status_translation = { 'interested': 'Projeven zájem', 'data_collected': 'Údaje poskytnuty', 'confirmed': 'Potvrzeno' }
+
     for part in active_participations:
-        # !! OPRAVA ZDE: Použijeme hranaté závorky místo .get() !!
+        # Použijeme přímý přístup s ['key'], protože JOIN garantuje existenci
+        # a sqlite3.Row podporuje přístup jako slovník
         try:
-             call_name = part['call_name'] # Přímo přistoupíme, JOIN by měl zajistit existenci
+             call_name = part['call_name'] # Přímo přistoupíme
         except (IndexError, KeyError): # Zachytíme jak IndexError pro Row, tak KeyError pro dict
              call_name = f"Výzva ID {part['call_id'] if 'call_id' in part else '?'}" # Fallback
              logger.warning(f"Chybí 'call_name' v účasti pro user {user_id}")
@@ -216,11 +223,10 @@ async def my_participations_command(update: Update, context: ContextTypes.DEFAUL
             status = 'Neznámý'
             logger.warning(f"Chybí 'status' v účasti pro user {user_id}")
 
-        status_cz = status_translation.get(status, status) # Použijeme status jako fallback, pokud není v překladu
+        status_cz = status_translation.get(status, status) # Použijeme status jako fallback
 
         message_parts.append(f"\n- *{call_name}*")
         message_parts.append(f"  Stav: {status_cz}")
-        # ---------------------------------------------------------
 
     try: await update.message.reply_text("\n".join(message_parts), parse_mode=ParseMode.MARKDOWN)
     except Exception as e: logger.warning(f"Nepodařilo se poslat moje_ucasti s Markdown: {e}. Posílám jako prostý text."); plain_text = "\n".join(message_parts).replace('*',''); await update.message.reply_text(plain_text)
