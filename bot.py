@@ -19,8 +19,9 @@ from config import TELEGRAM_TOKEN
 from database import (
     init_db, get_db_connection, get_active_calls, get_call_details,
     update_user_consent, add_or_update_user, add_or_update_participation,
-    get_participation, get_user_active_participations # <-- Důležitý import
+    get_participation, get_user_active_participations # <-- Ujistěte se, že tento import je správný
 )
+# Importujeme logiku z nového souboru
 import bot_logic
 
 # --- Logging ---
@@ -31,28 +32,50 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # --- Stavy konverzace ---
-ASKING_DATA, PROCESSING_DATA = range(2)
+ASKING_DATA, PROCESSING_DATA = range(2) # 0, 1
 
 # --- Běžné Handlery ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # (kód start funkce zůstává stejný)
-    user = update.effective_user; user_id = user.id; first_name = user.first_name or "Uživateli"; username = user.username; last_name = user.last_name
+    """Odešle uvítací zprávu a žádost o souhlas."""
+    user = update.effective_user
+    user_id = user.id
+    first_name = user.first_name or "Uživateli"
+    username = user.username
+    last_name = user.last_name
     logger.info(f"User {user_id} ({username or 'bez @'}) spustil /start.")
-    if not add_or_update_user(user_id, first_name, last_name, username): await update.message.reply_text("Omlouvám se, nastala interní chyba."); return ConversationHandler.END
-    welcome_message = (f"Ahoj {first_name}! Vítej v DealUpBotu.\n\n" + "Pomáhám lidem spojit se pro kolektivní nákupy ('Výzvy') a získat tak lepší ceny.\n\n" + "Než začneme, potřebuji tvůj **souhlas se zpracováním údajů** (Telegram ID, jméno) " + "a **zasíláním nabídek** ('Výzev'). Souhlasíš?")
+
+    if not add_or_update_user(user_id, first_name, last_name, username):
+        await update.message.reply_text("Omlouvám se, nastala interní chyba.")
+        return ConversationHandler.END
+
+    welcome_message = (
+        f"Ahoj {first_name}! Vítej v DealUpBotu.\n\n"
+        "Pomáhám lidem spojit se pro kolektivní nákupy ('Výzvy') a získat tak lepší ceny.\n\n"
+        "Než začneme, potřebuji tvůj **souhlas se zpracováním údajů** (Telegram ID, jméno) "
+        "a **zasíláním nabídek** ('Výzev'). Souhlasíš?"
+    )
     reply_keyboard = [[KeyboardButton("Ano, souhlasím 👍")], [KeyboardButton("Ne, děkuji")]]
     markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
     await update.message.reply_text(welcome_message, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
     return ConversationHandler.END
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # (kód help funkce zůstává stejný)
-    help_text = ("Jsem DealUpBot a pomohu ti s kolektivními nákupy ('Výzvami').\n\n" + "Základní příkazy:\n" + "/start - Úvod a udělení souhlasu.\n" + "/vyzvy - Zobrazí aktuální aktivní Výzvy.\n" + "/zrusit_ucast - Umožní zrušit tvou účast v aktivní Výzvě.\n" + "/moje_ucasti - Zobrazí tvé aktivní účasti.\n" + "/help - Zobrazí tuto nápovědu.\n" + "/cancel - Zruší aktuálně probíhající akci (např. sběr údajů).\n")
+    """Odešle nápovědu jako prostý text."""
+    help_text = (
+        "Jsem DealUpBot a pomohu ti s kolektivními nákupy ('Výzvami').\n\n"
+        "Základní příkazy:\n"
+        "/start - Úvod a udělení souhlasu.\n"
+        "/vyzvy - Zobrazí aktuální aktivní Výzvy.\n"
+        "/zrusit_ucast - Umožní zrušit tvou účast v aktivní Výzvě.\n"
+        "/moje_ucasti - Zobrazí tvé aktivní účasti.\n" # Přidáno
+        "/help - Zobrazí tuto nápovědu.\n"
+        "/cancel - Zruší aktuálně probíhající akci (např. sběr údajů).\n"
+    )
     await update.message.reply_text(help_text)
 
 async def handle_consent_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # (kód handle_consent_response zůstává stejný)
+    """Zpracuje odpověď na souhlas."""
     user_id = update.effective_user.id; response = update.message.text
     logger.info(f"User {user_id} odpověděl na souhlas: {response}")
     new_consent_status = 'pending'; reply_text = ""; show_calls_after = False
@@ -62,11 +85,11 @@ async def handle_consent_response(update: Update, context: ContextTypes.DEFAULT_
     else: await update.message.reply_text("Chyba při ukládání volby.", reply_markup=ReplyKeyboardRemove())
 
 async def list_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # (kód list_calls zůstává stejný)
+    """Zobrazí seznam aktivních Výzev s inline tlačítky."""
     user_id = update.effective_user.id; chat_id = update.effective_chat.id
     logger.info(f"User {user_id} spouští zobrazení výzev.")
     active_calls = get_active_calls()
-    message_text = bot_logic.format_calls_list_message(active_calls)
+    message_text = bot_logic.format_calls_list_message(active_calls) # Volání refaktorované funkce
     keyboard = []; reply_markup = None
     if active_calls:
         for call in active_calls:
@@ -77,34 +100,61 @@ async def list_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try: await context.bot.send_message(chat_id=chat_id, text=message_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     except Exception as md_error: logger.warning(f"Nepodařilo se poslat list_calls s Markdown: {md_error}. Posílám jako prostý text."); plain_text = message_text.replace('*','').replace('~','').replace(r'\.','.'); await context.bot.send_message(chat_id=chat_id, text=plain_text, reply_markup=reply_markup)
 
+
 # --- ConversationHandler pro sběr dat ---
-# (Funkce handle_call_selection, ask_next_data, process_data_input, cancel_conversation zůstávají stejné)
+
 async def handle_call_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
-    query = update.callback_query; await query.answer(); callback_data = query.data; user = update.effective_user; user_id = user.id; first_name = user.first_name or "Uživateli"; logger.info(f"HANDLER: User {user_id} stiskl tlačítko: {callback_data}")
-    if not callback_data.startswith("call_"): logger.warning(f"HANDLER: User {user_id} poslal neočekávaný callback (ne call_): {callback_data}"); return None
+    """Zpracuje výběr Výzvy a případně spustí ConversationHandler."""
+    query = update.callback_query
+    await query.answer()
+    callback_data = query.data
+    user = update.effective_user
+    user_id = user.id
+    first_name = user.first_name or "Uživateli"
+    logger.info(f"HANDLER: User {user_id} stiskl tlačítko: {callback_data}")
+
+    if not callback_data.startswith("call_"):
+        logger.warning(f"HANDLER: User {user_id} poslal neočekávaný callback (ne call_): {callback_data}")
+        return None
+
     next_state = ConversationHandler.END
+
     try:
-        call_id = int(callback_data.split("_")[1]); result = bot_logic.process_call_selection(user_id, call_id, first_name)
-        if result['status'] == 'error' or result['status'] == 'info': await query.edit_message_text(text=result['message'], reply_markup=None)
+        call_id = int(callback_data.split("_")[1])
+        result = bot_logic.process_call_selection(user_id, call_id, first_name)
+
+        if result['status'] == 'error' or result['status'] == 'info':
+            await query.edit_message_text(text=result['message'], reply_markup=None)
+            # next_state zůstává END
+
         elif result['status'] == 'ok':
-            final_message = result['message']; state_code = result.get('next_state'); use_markdown = (state_code != -1)
-            if state_code == -1:
-                call_details = get_call_details(call_id)
-                if call_details:
-                    format_data = {"user_first_name": first_name, "user_id": user_id, "call_name": call_details.get('name', f"Výzva ID {call_id}"), "deal_price": call_details.get('deal_price', 'N/A'), "call_id": call_id}
-                    instruction_template = call_details.get('final_instructions') or "Účast potvrzena! Další instrukce brzy."
-                    try: formatted_instructions = instruction_template.format(**format_data); base_message = f"Skvělé, {first_name}! Účast ve Výzvě '{format_data['call_name']}' potvrzena!\n\n"; final_message = base_message + formatted_instructions
-                    except KeyError as e: logger.error(f"Chybějící klíč '{e}' při formátování final_instructions (no data needed)."); final_message = result['message']
-                else: final_message = result['message']
-                use_markdown = False # Pro finální zprávu bezpečněji bez MD
+            final_message = result['message']
+            state_code = result.get('next_state')
+            use_markdown = (state_code != -1) # Jen u potvrzení zájmu
+
+            if state_code == -1: # Končíme (potvrzeno bez dat)
+                 # Pro finální zprávu bez dat nepoužíváme Markdown
+                 use_markdown = False
+
             await query.edit_message_text(text=final_message, reply_markup=None, parse_mode=ParseMode.MARKDOWN if use_markdown else None)
+
             if 'user_data_updates' in result: context.user_data.update(result['user_data_updates'])
-            if state_code == ASKING_DATA: return await ask_next_data(update, context)
-            else: next_state = ConversationHandler.END;
-                  for key in list(context.user_data.keys()):
-                      if key.startswith('current_') or key in ['data_needed_list', 'data_needed_index', 'collected_data_so_far']: context.user_data.pop(key, None)
-        else: logger.error(f"Neznámý status '{result.get('status')}' vrácen z process_call_selection."); await query.edit_message_text("Nastala neočekávaná chyba.")
+
+            if state_code == ASKING_DATA: # 0
+                 return await ask_next_data(update, context)
+            else: # state_code je -1 nebo None
+                 next_state = ConversationHandler.END
+                 # !! SPRÁVNÉ ODSAZENÍ ZDE !!
+                 for key in list(context.user_data.keys()):
+                    if key.startswith('current_') or key in ['data_needed_list', 'data_needed_index', 'collected_data_so_far']:
+                         context.user_data.pop(key, None)
+        else:
+            logger.error(f"Neznámý status '{result.get('status')}' vrácen z process_call_selection.")
+            await query.edit_message_text("Nastala neočekávaná chyba.")
+            next_state = ConversationHandler.END
+
         return next_state
+
     except (IndexError, ValueError) as e: logger.error(f"HANDLER: Neplatný formát call_ callback_data: {callback_data} pro user {user_id}. Chyba: {e}"); await context.bot.send_message(chat_id=query.message.chat_id, text="Chyba při zpracování volby."); return ConversationHandler.END
     except Exception as e: logger.error(f"HANDLER: Neočekávaná chyba při handle_call_selection {callback_data} pro user {user_id}: {e}");
                          try: await context.bot.send_message(chat_id=query.message.chat_id, text="Neočekávaná chyba při zpracování vaší volby.")
@@ -112,6 +162,7 @@ async def handle_call_selection(update: Update, context: ContextTypes.DEFAULT_TY
                          return ConversationHandler.END
 
 async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Zeptá se na další údaj nebo ukončí konverzaci."""
     # (kód ask_next_data zůstává stejný)
     user_data = context.user_data; needed_list = user_data.get('data_needed_list', []); current_index = user_data.get('data_needed_index', 0)
     chat_id = update.effective_chat.id if update.effective_chat else (update.callback_query.message.chat_id if update.callback_query else None)
@@ -137,8 +188,9 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             try: await context.bot.send_message(chat_id=chat_id, text=confirmation_message, parse_mode=ParseMode.MARKDOWN)
             except Exception as md_error: logger.warning(f"Nepodařilo se poslat final confirmation s Markdown: {md_error}. Posílám jako prostý text."); plain_text = confirmation_message.replace('**',''); await context.bot.send_message(chat_id=chat_id, text=plain_text)
         else: await context.bot.send_message(chat_id=chat_id, text="Chyba při ukládání údajů.")
-        for key in list(user_data.keys()):
-            if key.startswith('current_') or key in ['data_needed_list', 'data_needed_index', 'collected_data_so_far']: user_data.pop(key, None)
+        for key in list(user_data.keys()): # !! SPRÁVNÉ ODSAZENÍ ZDE !!
+            if key.startswith('current_') or key in ['data_needed_list', 'data_needed_index', 'collected_data_so_far']:
+                user_data.pop(key, None)
         return ConversationHandler.END
     else:
         data_key = needed_list[current_index].strip(); user_data['current_data_key'] = data_key
@@ -177,7 +229,7 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
     if call_id:
          if not add_or_update_participation(user_id=user.id, call_id=call_id, status='cancelled'): logger.error(f"Nepodařilo se aktualizovat status na 'cancelled' pro user {user.id}, call {call_id}")
     await update.message.reply_text("Akce byla zrušena.", reply_markup=ReplyKeyboardRemove())
-    for key in list(user_data.keys()):
+    for key in list(user_data.keys()): # !! SPRÁVNÉ ODSAZENÍ ZDE !!
         if key.startswith('current_') or key in ['data_needed_list', 'data_needed_index', 'collected_data_so_far']:
             user_data.pop(key, None)
     return ConversationHandler.END
@@ -205,7 +257,7 @@ async def handle_cancel_selection(update: Update, context: ContextTypes.DEFAULT_
     else: logger.warning(f"User {user_id} poslal neznámý cancel callback: {callback_data}"); await query.edit_message_text("Neznámá akce.", reply_markup=None)
 
 
-# --- NOVÝ HANDLER pro /moje_ucasti ---
+# --- NOVÝ HANDLER pro /moje_ucasti --- (Musí být definován PŘED main)
 async def my_participations_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Zobrazí uživateli jeho aktivní účasti."""
     user_id = update.effective_user.id
@@ -224,12 +276,11 @@ async def my_participations_command(update: Update, context: ContextTypes.DEFAUL
         'interested': 'Projeven zájem',
         'data_collected': 'Údaje poskytnuty',
         'confirmed': 'Potvrzeno'
-        # Status 'cancelled' by se zde neměl objevit díky DB dotazu
     }
     for part in active_participations:
-        call_name = part.get('call_name', f"Výzva ID {part.get('call_id', '?')}")
+        call_name = part.get('call_name', f"Výzva ID {part.get('call_id', '?')}") # Bezpečnější přístup
         status_cz = status_translation.get(part.get('status', ''), part.get('status', 'Neznámý'))
-        message_parts.append(f"\n- *{call_name}*") # Použijeme Markdown pro název
+        message_parts.append(f"\n- *{call_name}*")
         message_parts.append(f"  Stav: {status_cz}")
 
     try:
@@ -267,7 +318,8 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("vyzvy", list_calls))
     application.add_handler(CommandHandler("zrusit_ucast", cancel_participation_start))
-    application.add_handler(CommandHandler("moje_ucasti", my_participations_command)) # <<< ZAREGISTROVÁNO ZDE
+    # !! ZAREGISTROVÁNÍ NOVÉ FUNKCE !!
+    application.add_handler(CommandHandler("moje_ucasti", my_participations_command))
     application.add_handler(MessageHandler(filters.Regex("^(Ano, souhlasím 👍|Ne, děkuji)$"), handle_consent_response)) # 3. Specifický text
     application.add_handler(CallbackQueryHandler(handle_cancel_selection, pattern="^cancel_")) # 4. Další Callbacks
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unknown_message)) # 5. Neznámý text
