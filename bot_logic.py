@@ -1,6 +1,6 @@
 # bot_logic.py
 import logging
-from telegram.constants import ParseMode
+from telegram.constants import ParseMode  # Může se hodit pro formátování
 
 # Importujeme databázové funkce
 from database import get_call_details, get_participation, add_or_update_participation
@@ -20,6 +20,7 @@ def format_calls_list_message(active_calls):
             description = call["description"] or ""
             original_price = call["original_price"]
             deal_price = call["deal_price"]
+            # Oprava: Odstraněno escapování tečky, které způsobovalo SyntaxError
             original_price_str = (
                 f"~{str(original_price)} Kč~" if original_price is not None else ""
             )
@@ -28,16 +29,20 @@ def format_calls_list_message(active_calls):
                 f"\n*{name}*\n{description}\nCena: {original_price_str} -> *{deal_price_str} Kč*\n--------------------"
             )
         except KeyError as e:
+            log_call_id = (
+                call["call_id"] if isinstance(call, (dict, sqlite3.Row)) else "N/A"
+            )
             logger.error(
-                f"Chybějící klíč '{e}' ve 'call' datech ID {call.get('call_id', '?') if isinstance(call, dict) else call['call_id']}"
+                f"Chybějící klíč '{e}' ve 'call' datech při formátování výzvy ID {log_call_id}"
             )
             message_parts.append(
                 f"\n*Chyba při načítání detailů výzvy*\n--------------------"
             )
         except Exception as e:
-            logger.error(
-                f"Neočekávaná chyba formátování výzvy {call.get('call_id', '?') if isinstance(call, dict) else call['call_id']}: {e}"
+            log_call_id = (
+                call["call_id"] if isinstance(call, (dict, sqlite3.Row)) else "N/A"
             )
+            logger.error(f"Neočekávaná chyba při formátování výzvy {log_call_id}: {e}")
             message_parts.append(
                 f"\n*Chyba při načítání detailů výzvy*\n--------------------"
             )
@@ -45,17 +50,24 @@ def format_calls_list_message(active_calls):
 
 
 def process_call_selection(user_id: int, call_id: int, user_first_name: str):
-    """Zpracuje logiku po výběru výzvy uživatelem (s opravou přístupu k details)."""
+    """
+    Zpracuje logiku po výběru výzvy uživatelem (s opravou přístupu k details).
+    Vrací slovník s výsledkem pro handler v bot.py.
+    """
     logger.info(f"BOT_LOGIC: Zpracovávám výběr výzvy {call_id} pro uživatele {user_id}")
     call_details = get_call_details(call_id)
     call_name = f"Výzva ID {call_id}"  # Defaultní jméno pro případ chyby
 
-    if call_details:  # Bezpečné načtení jména, pokud detaily existují
+    # Bezpečné načtení jména hned na začátku, pokud detaily máme
+    if call_details:
         try:
             call_name = call_details["name"] or call_name
         except IndexError:
-            logger.warning(f"Sloupec 'name' chybí pro call_id {call_id}.")
+            logger.warning(
+                f"Sloupec 'name' chybí pro call_id {call_id} v process_call_selection."
+            )
 
+    # Kontrola existence a stavu výzvy
     if not call_details or call_details["status"] != "active":
         return {
             "status": "error",
@@ -63,6 +75,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
             "next_state": -1,
         }
 
+    # Kontrola existující účasti
     participation = get_participation(user_id, call_id)
     if participation and participation["status"] not in ["interested", "cancelled"]:
         return {
@@ -71,6 +84,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
             "next_state": -1,
         }
 
+    # Přidání/aktualizace účasti na 'interested'
     if not add_or_update_participation(user_id, call_id, status="interested"):
         return {
             "status": "error",
@@ -78,10 +92,10 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
             "next_state": -1,
         }
 
+    # Kontrola, zda jsou potřeba data (s bezpečným přístupem)
     data_needed_str = None
     final_instructions = "Další instrukce brzy."
     deal_price_str = "N/A"
-    # Bezpečné načtení potřebných detailů
     if call_details:
         try:
             data_needed_str = call_details["data_needed"]
@@ -96,7 +110,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
         try:
             deal_price_str = str(call_details["deal_price"])
         except IndexError:
-            pass
+            pass  # Pokud chybí cena, použije se default "N/A"
 
     if data_needed_str:
         data_needed_list = [
@@ -129,7 +143,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
                     formatted_instructions = final_instructions
                 return {
                     "status": "ok",
-                    # Posíláme jako prostý text (bez parse_mode), odstraněno formátování *
+                    # Posíláme jako prostý text
                     "message": f"Skvělé, {user_first_name}! Účast ve Výzvě '{call_name}' potvrzena!\n\n{formatted_instructions}",
                     "next_state": -1,
                 }
@@ -180,7 +194,7 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
                 formatted_instructions = final_instructions
             return {
                 "status": "ok",
-                # Posíláme jako prostý text (bez parse_mode)
+                # Posíláme jako prostý text
                 "message": f"Skvělé, {user_first_name}! Účast ve Výzvě '{call_name}' potvrzena!\n\n{formatted_instructions}",
                 "next_state": -1,
             }
@@ -193,3 +207,4 @@ def process_call_selection(user_id: int, call_id: int, user_first_name: str):
 
 
 # --- Zde budeme přidávat další logické funkce ---
+# Např. pro validaci, formátování finálních kroků atd.
