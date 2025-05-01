@@ -4,31 +4,40 @@ import json
 import re
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler, filters, ContextTypes,
-    CallbackQueryHandler, ConversationHandler
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+    CallbackQueryHandler,
+    ConversationHandler
 )
 from telegram.constants import ParseMode
 
 # --- Importy ---
-from config import TELEGRAM_TOKEN, ADMIN_IDS # <-- Přidán import ADMIN_IDS
+from config import TELEGRAM_TOKEN, ADMIN_IDS # Přidán import ADMIN_IDS
 from database import (
     init_db, get_db_connection, get_active_calls, get_call_details,
     update_user_consent, add_or_update_user, add_or_update_participation,
-    get_participation, get_user_active_participations, add_new_call # <-- Přidán import add_new_call
+    get_participation, get_user_active_participations, add_new_call # Přidán import add_new_call
 )
+# Importujeme logiku z nového souboru
 import bot_logic
 
 # --- Logging ---
-logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+# Používáme konzistentní odsazení 4 mezery
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# --- Stavy konverzace pro sběr dat účasti ---
+# --- Stavy konverzace ---
+# Pro sběr dat účasti
 ASKING_DATA, PROCESSING_DATA = range(2)
-
-# --- Stavy konverzace pro PŘIDÁNÍ VÝZVY (/addcall) ---
+# Pro přidání výzvy adminem
 GET_CALL_NAME, GET_CALL_DESC, GET_CALL_ORIG_PRICE, GET_CALL_DEAL_PRICE, \
-GET_CALL_DATA_NEEDED, GET_CALL_FINAL_INST, CONFIRM_ADD_CALL = range(7) # Stavy 0-6 pro tuto konverzaci
+GET_CALL_DATA_NEEDED, GET_CALL_FINAL_INST, CONFIRM_ADD_CALL = range(7)
 
 # --- Administrátorský check ---
 def is_admin(user_id: int) -> bool:
@@ -36,22 +45,50 @@ def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 # --- Běžné Handlery ---
-# (start, help_command, handle_consent_response, list_calls zůstávají stejné)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    user = update.effective_user; user_id = user.id; first_name = user.first_name or "Uživateli"; username = user.username; last_name = user.last_name
+    """Odešle uvítací zprávu a žádost o souhlas."""
+    user = update.effective_user
+    user_id = user.id
+    first_name = user.first_name or "Uživateli"
+    username = user.username
+    last_name = user.last_name
     logger.info(f"User {user_id} ({username or 'bez @'}) spustil /start.")
-    if not add_or_update_user(user_id, first_name, last_name, username): await update.message.reply_text("Omlouvám se, nastala interní chyba."); return ConversationHandler.END
-    welcome_message = (f"Ahoj {first_name}! Vítej v DealUpBotu.\n\n" + "Pomáhám lidem spojit se pro kolektivní nákupy ('Výzvy') a získat tak lepší ceny.\n\n" + "Než začneme, potřebuji tvůj **souhlas se zpracováním údajů** (Telegram ID, jméno) " + "a **zasíláním nabídek** ('Výzev'). Souhlasíš?")
+
+    if not add_or_update_user(user_id, first_name, last_name, username):
+        await update.message.reply_text("Omlouvám se, nastala interní chyba.")
+        return ConversationHandler.END
+
+    welcome_message = (
+        f"Ahoj {first_name}! Vítej v DealUpBotu.\n\n"
+        "Pomáhám lidem spojit se pro kolektivní nákupy ('Výzvy') a získat tak lepší ceny.\n\n"
+        "Než začneme, potřebuji tvůj **souhlas se zpracováním údajů** (Telegram ID, jméno) "
+        "a **zasíláním nabídek** ('Výzev'). Souhlasíš?"
+    )
     reply_keyboard = [[KeyboardButton("Ano, souhlasím 👍")], [KeyboardButton("Ne, děkuji")]]
     markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
     await update.message.reply_text(welcome_message, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
     return ConversationHandler.END
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    help_text = ("Jsem DealUpBot a pomohu ti s kolektivními nákupy ('Výzvami').\n\n" + "Základní příkazy:\n" + "/start - Úvod a udělení souhlasu.\n" + "/vyzvy - Zobrazí aktuální aktivní Výzvy.\n" + "/zrusit_ucast - Umožní zrušit tvou účast v aktivní Výzvě.\n" + "/moje_ucasti - Zobrazí tvé aktivní účasti.\n" + "/help - Zobrazí tuto nápovědu.\n" + "/cancel - Zruší aktuálně probíhající akci (např. sběr údajů, přidávání výzvy).\n\n" + "**Admin příkazy:**\n" + "/addcall - Spustí proces přidání nové výzvy.\n")
+    """Odešle nápovědu jako prostý text."""
+    help_text = (
+        "Jsem DealUpBot a pomohu ti s kolektivními nákupy ('Výzvami').\n\n"
+        "Základní příkazy:\n"
+        "/start - Úvod a udělení souhlasu.\n"
+        "/vyzvy - Zobrazí aktuální aktivní Výzvy.\n"
+        "/zrusit_ucast - Umožní zrušit tvou účast v aktivní Výzvě.\n"
+        "/moje_ucasti - Zobrazí tvé aktivní účasti.\n"
+        "/help - Zobrazí tuto nápovědu.\n"
+        "/cancel - Zruší aktuálně probíhající akci (např. sběr údajů, přidávání výzvy).\n\n"
+        "**Admin příkazy:**\n"
+        "/addcall - Spustí proces přidání nové výzvy.\n"
+    )
+    # Posíláme jako prostý text kvůli předchozím problémům s Markdown
     await update.message.reply_text(help_text)
 
 async def handle_consent_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Zpracuje odpověď na souhlas."""
     user_id = update.effective_user.id; response = update.message.text
     logger.info(f"User {user_id} odpověděl na souhlas: {response}")
     new_consent_status = 'pending'; reply_text = ""; show_calls_after = False
@@ -61,10 +98,11 @@ async def handle_consent_response(update: Update, context: ContextTypes.DEFAULT_
     else: await update.message.reply_text("Chyba při ukládání volby.", reply_markup=ReplyKeyboardRemove())
 
 async def list_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Zobrazí seznam aktivních Výzev s inline tlačítky."""
     user_id = update.effective_user.id; chat_id = update.effective_chat.id
     logger.info(f"User {user_id} spouští zobrazení výzev.")
     active_calls = get_active_calls()
-    message_text = bot_logic.format_calls_list_message(active_calls)
+    message_text = bot_logic.format_calls_list_message(active_calls) # Volání refaktorované funkce
     keyboard = []; reply_markup = None
     if active_calls:
         for call in active_calls:
@@ -76,34 +114,82 @@ async def list_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except Exception as md_error: logger.warning(f"Nepodařilo se poslat list_calls s Markdown: {md_error}. Posílám jako prostý text."); plain_text = message_text.replace('*','').replace('~','').replace(r'\.','.'); await context.bot.send_message(chat_id=chat_id, text=plain_text, reply_markup=reply_markup)
 
 # --- ConversationHandler pro sběr dat (ÚČAST) ---
-# (handle_call_selection, ask_next_data, process_data_input, cancel_conversation zůstávají stejné)
+
 async def handle_call_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
-    # ... (kód handle_call_selection) ...
-    query = update.callback_query; await query.answer(); callback_data = query.data; user = update.effective_user; user_id = user.id; first_name = user.first_name or "Uživateli"; logger.info(f"HANDLER: User {user_id} stiskl tlačítko: {callback_data}")
-    if not callback_data.startswith("call_"): logger.warning(f"HANDLER: User {user_id} poslal neočekávaný callback (ne call_): {callback_data}"); return None
+    """Zpracuje výběr Výzvy a případně spustí ConversationHandler."""
+    query = update.callback_query
+    await query.answer()
+    callback_data = query.data
+    user = update.effective_user
+    user_id = user.id
+    first_name = user.first_name or "Uživateli"
+    logger.info(f"HANDLER: User {user_id} stiskl tlačítko: {callback_data}")
+
+    if not callback_data.startswith("call_"):
+        logger.warning(f"HANDLER: User {user_id} poslal neočekávaný callback (ne call_): {callback_data}")
+        return None
+
     next_state = ConversationHandler.END
+
     try:
-        call_id = int(callback_data.split("_")[1]); result = bot_logic.process_call_selection(user_id, call_id, first_name)
-        if result['status'] == 'error' or result['status'] == 'info': await query.edit_message_text(text=result['message'], reply_markup=None)
+        call_id = int(callback_data.split("_")[1])
+        result = bot_logic.process_call_selection(user_id, call_id, first_name)
+
+        if result['status'] == 'error' or result['status'] == 'info':
+            await query.edit_message_text(text=result['message'], reply_markup=None)
+            # next_state zůstává END
+
         elif result['status'] == 'ok':
-            final_message = result['message']; state_code = result.get('next_state'); use_markdown = (state_code != -1)
-            if state_code == -1: use_markdown = False # Bez Markdown pro finální potvrzení bez dat
-            await query.edit_message_text(text=final_message, reply_markup=None, parse_mode=ParseMode.MARKDOWN if use_markdown else None)
-            if 'user_data_updates' in result: context.user_data.update(result['user_data_updates'])
-            if state_code == ASKING_DATA: return await ask_next_data(update, context) # Správně vracíme volání funkce
-            else: next_state = ConversationHandler.END; # state_code je -1 nebo None
-                  for key in list(context.user_data.keys()):
-                      if key.startswith('current_') or key in ['data_needed_list', 'data_needed_index', 'collected_data_so_far']: context.user_data.pop(key, None)
-        else: logger.error(f"Neznámý status '{result.get('status')}' vrácen z process_call_selection."); await query.edit_message_text("Nastala neočekávaná chyba.")
+            final_message = result['message']
+            state_code = result.get('next_state')
+            use_markdown = (state_code == ASKING_DATA) # Jen u potvrzení zájmu
+
+            # !! Správné odsazení !!
+            if state_code == -1: # Končíme (potvrzeno bez dat)
+                use_markdown = False # Pro finální zprávu bez dat nepoužíváme Markdown
+
+            await query.edit_message_text(
+                text=final_message,
+                reply_markup=None,
+                parse_mode=ParseMode.MARKDOWN if use_markdown else None
+            )
+
+            if 'user_data_updates' in result:
+                context.user_data.update(result['user_data_updates'])
+
+            if state_code == ASKING_DATA: # 0
+                return await ask_next_data(update, context)
+            else: # state_code je -1 nebo None
+                next_state = ConversationHandler.END
+                # Vyčistíme user_data
+                for key in list(context.user_data.keys()): # Odsazení 12
+                    if key.startswith('current_') or key in ['data_needed_list', 'data_needed_index', 'collected_data_so_far']: # Odsazení 16
+                        context.user_data.pop(key, None) # Odsazení 20
+        else:
+            logger.error(f"Neznámý status '{result.get('status')}' vrácen z process_call_selection.")
+            await query.edit_message_text("Nastala neočekávaná chyba.")
+            next_state = ConversationHandler.END
+
         return next_state
-    except (IndexError, ValueError) as e: logger.error(f"HANDLER: Neplatný formát call_ callback_data: {callback_data} pro user {user_id}. Chyba: {e}"); await context.bot.send_message(chat_id=query.message.chat_id, text="Chyba při zpracování volby."); return ConversationHandler.END
-    except Exception as e: logger.error(f"HANDLER: Neočekávaná chyba při handle_call_selection {callback_data} pro user {user_id}: {e}");
-                         try: await context.bot.send_message(chat_id=query.message.chat_id, text="Neočekávaná chyba při zpracování vaší volby.")
-                         except Exception as send_e: logger.error(f"HANDLER: Nepodařilo se odeslat ani chybovou zprávu uživateli {user_id}: {send_e}")
-                         return ConversationHandler.END
+
+    except (IndexError, ValueError) as e:
+        logger.error(f"HANDLER: Neplatný formát call_ callback_data: {callback_data} pro user {user_id}. Chyba: {e}")
+        try: # Odsazení 8
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Chyba při zpracování volby.")
+        except Exception as send_e: # Odsazení 8
+            logger.error(f"HANDLER: Nepodařilo se odeslat ani chybovou zprávu uživateli {user_id}: {send_e}")
+        return ConversationHandler.END # Odsazení 8
+    except Exception as e:
+        logger.error(f"HANDLER: Neočekávaná chyba při handle_call_selection {callback_data} pro user {user_id}: {e}")
+        try: # !! SPRÁVNÉ ODSAZENÍ ZDE !! (Odsazení 12)
+            await context.bot.send_message(chat_id=query.message.chat_id, text="Neočekávaná chyba při zpracování vaší volby.")
+        except Exception as send_e: # Odsazení 12
+            logger.error(f"HANDLER: Nepodařilo se odeslat ani chybovou zprávu uživateli {user_id}: {send_e}")
+        return ConversationHandler.END # Odsazení 8 (patří k vnějšímu except)
+
 
 async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # ... (kód ask_next_data) ...
+    """Zeptá se na další údaj nebo ukončí konverzaci."""
     user_data = context.user_data; needed_list = user_data.get('data_needed_list', []); current_index = user_data.get('data_needed_index', 0)
     chat_id = update.effective_chat.id if update.effective_chat else (update.callback_query.message.chat_id if update.callback_query else None)
     if not chat_id: logger.error("Nemohu získat chat_id v ask_next_data"); return ConversationHandler.END
@@ -128,9 +214,11 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             try: await context.bot.send_message(chat_id=chat_id, text=confirmation_message, parse_mode=ParseMode.MARKDOWN)
             except Exception as md_error: logger.warning(f"Nepodařilo se poslat final confirmation s Markdown: {md_error}. Posílám jako prostý text."); plain_text = confirmation_message.replace('**',''); await context.bot.send_message(chat_id=chat_id, text=plain_text)
         else: await context.bot.send_message(chat_id=chat_id, text="Chyba při ukládání údajů.")
-        for key in list(user_data.keys()):
-            if key.startswith('current_') or key in ['data_needed_list', 'data_needed_index', 'collected_data_so_far']: user_data.pop(key, None)
-        return ConversationHandler.END
+        # !! SPRÁVNÉ ODSAZENÍ ZDE !!
+        for key in list(user_data.keys()): # Odsazení 8
+            if key.startswith('current_') or key in ['data_needed_list', 'data_needed_index', 'collected_data_so_far']: # Odsazení 12
+                user_data.pop(key, None) # Odsazení 16
+        return ConversationHandler.END # Odsazení 8
     else:
         data_key = needed_list[current_index].strip(); user_data['current_data_key'] = data_key
         questions = {"adresa doručení": "Prosím, zadej **adresu doručení** (ulice, č.p., město, PSČ):", "telefonní číslo": "Prosím, zadej své **telefonní číslo**:", "počet kusů": "Prosím, zadej požadovaný **počet kusů**:", "email": "Prosím, zadej svou **emailovou adresu**:",}
@@ -139,7 +227,7 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return PROCESSING_DATA
 
 async def process_data_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # (kód process_data_input zůstává stejný s validací)
+    """Zpracuje a validuje odpověď uživatele."""
     user_data = context.user_data; user_input = update.message.text; user_id = update.effective_user.id; current_key = user_data.get('current_data_key')
     if not current_key: logger.warning(f"User {user_id} poslal '{user_input}', ale nečekal se údaj."); return PROCESSING_DATA
     logger.info(f"User {user_id} zadal údaj '{user_input}' pro '{current_key}'")
@@ -162,31 +250,25 @@ async def process_data_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return await ask_next_data(update, context)
 
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Ukončí ConversationHandler (pro oba typy konverzací)."""
+    """Univerzální cancel, který ukončí jakoukoli konverzaci."""
     user = update.effective_user; user_data = context.user_data
-    call_id = user_data.get('current_call_id') # Pro zrušení účasti
-    adding_call_data = user_data.get('new_call_data') # Pro zrušení přidávání výzvy
+    call_id = user_data.get('current_call_id')
+    adding_call_data = user_data.get('new_call_data')
 
-    if call_id:
-         logger.info(f"User {user.id} zrušil sběr dat pro call {call_id}.")
-         if not add_or_update_participation(user_id=user.id, call_id=call_id, status='cancelled'):
-              logger.error(f"Nepodařilo se aktualizovat status na 'cancelled' pro user {user.id}, call {call_id}")
-    elif adding_call_data is not None:
-         logger.info(f"Admin {user.id} zrušil přidávání nové výzvy.")
-    else:
-         logger.info(f"User {user.id} použil /cancel mimo známou konverzaci.")
+    if call_id: logger.info(f"User {user.id} zrušil sběr dat pro call {call_id}."); add_or_update_participation(user_id=user.id, call_id=call_id, status='cancelled')
+    elif adding_call_data is not None: logger.info(f"Admin {user.id} zrušil přidávání nové výzvy.")
+    else: logger.info(f"User {user.id} použil /cancel mimo známou konverzaci.")
 
     await update.message.reply_text("Akce byla zrušena.", reply_markup=ReplyKeyboardRemove())
-    # Vyčistíme všechny potenciální klíče z user_data
-    keys_to_clear = ['current_call_id', 'data_needed_list', 'data_needed_index',
-                     'collected_data_so_far', 'current_data_key', 'new_call_data']
-    for key in keys_to_clear:
-        user_data.pop(key, None)
-    return ConversationHandler.END
+    keys_to_clear = ['current_call_id', 'data_needed_list', 'data_needed_index', 'collected_data_so_far', 'current_data_key', 'new_call_data']
+    for key in list(user_data.keys()): # Odsazení: 4 mezery
+        if key in keys_to_clear: # Odsazení: 8 mezer
+            user_data.pop(key, None) # Odsazení: 12 mezer
+    return ConversationHandler.END # Odsazení: 4 mezery
 
 # --- Handlery pro /zrusit_ucast ---
-# (cancel_participation_start a handle_cancel_selection zůstávají stejné)
 async def cancel_participation_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # (kód cancel_participation_start zůstává stejný)
     user_id = update.effective_user.id; logger.info(f"User {user_id} spustil /zrusit_ucast"); active_participations = get_user_active_participations(user_id)
     if not active_participations: await update.message.reply_text("Nemáš žádné aktivní účasti."); return
     message_text = "Tvé aktivní účasti. Vyber, kterou chceš zrušit:\n"; keyboard = []
@@ -194,6 +276,7 @@ async def cancel_participation_start(update: Update, context: ContextTypes.DEFAU
     keyboard.append([InlineKeyboardButton("Zpět", callback_data="cancel_abort")]); reply_markup = InlineKeyboardMarkup(keyboard); await update.message.reply_text(message_text, reply_markup=reply_markup)
 
 async def handle_cancel_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # (kód handle_cancel_selection zůstává stejný)
     query = update.callback_query; await query.answer(); callback_data = query.data; user_id = query.from_user.id; logger.info(f"User {user_id} stiskl tlačítko zrušení: {callback_data}")
     if callback_data == "cancel_abort": await query.edit_message_text("Akce zrušena.", reply_markup=None); return
     if callback_data.startswith("cancel_"):
@@ -207,7 +290,8 @@ async def handle_cancel_selection(update: Update, context: ContextTypes.DEFAULT_
 
 # --- Handler pro /moje_ucasti ---
 async def my_participations_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # (kód my_participations_command zůstává stejný s opravou přístupu k 'part')
+    """Zobrazí uživateli jeho aktivní účasti."""
+    # (kód my_participations_command s opravou AttributeError)
     user_id = update.effective_user.id; logger.info(f"User {user_id} spustil /moje_ucasti")
     active_participations = get_user_active_participations(user_id)
     if not active_participations: await update.message.reply_text("Nemáš aktuálně žádné aktivní účasti ve Výzvách."); return
@@ -222,12 +306,11 @@ async def my_participations_command(update: Update, context: ContextTypes.DEFAUL
     try: await update.message.reply_text("\n".join(message_parts), parse_mode=ParseMode.MARKDOWN)
     except Exception as e: logger.warning(f"Nepodařilo se poslat moje_ucasti s Markdown: {e}. Posílám jako prostý text."); plain_text = "\n".join(message_parts).replace('*',''); await update.message.reply_text(plain_text)
 
-
 # --- Handler pro neznámé zprávy ---
 async def handle_unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # (kód handle_unknown_message zůstává stejný)
     text = update.message.text; user_id = update.effective_user.id
-    if 'current_data_key' in context.user_data or 'new_call_data' in context.user_data: logger.info(f"User {user_id} poslal '{text}' během konverzace."); await update.message.reply_text("Prosím, dokonči probíhající akci nebo ji zruš pomocí /cancel.")
+    if 'current_data_key' in context.user_data or 'new_call_data' in context.user_data: logger.info(f"User {user_id} poslal '{text}' během konverzace."); await update.message.reply_text("Probíhá jiná akce. Dokonči ji prosím, nebo ji zruš pomocí /cancel.")
     else: logger.warning(f"Received unknown text message from {user_id} mimo konverzaci: {text}"); await update.message.reply_text(f"Promiň, na zprávu '{text}' neumím reagovat. Zkus /help.")
 
 # ==== TESTOVACÍ FUNKCE ====
@@ -236,235 +319,118 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     logger.info("Test command triggered!"); await update.message.reply_text("Testovací příkaz funguje!")
 
 # ==== NOVÉ FUNKCE PRO /addcall ====
-
 async def add_call_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Spustí konverzaci pro přidání nové výzvy (jen pro admina)."""
+    # (kód add_call_start zůstává stejný)
     user_id = update.effective_user.id
-    if not is_admin(user_id):
-        logger.warning(f"Neoprávněný pokus o /addcall od user {user_id}")
-        await update.message.reply_text("Tento příkaz může použít pouze administrátor.")
-        return ConversationHandler.END # Ukončíme, pokud není admin
-
-    logger.info(f"Admin {user_id} spustil /addcall")
-    context.user_data['new_call_data'] = {} # Inicializujeme slovník pro data nové výzvy
-    await update.message.reply_text("Začínáme přidávat novou výzvu.\n"
-                                     "Nejprve zadej **Název výzvy**:", parse_mode=ParseMode.MARKDOWN)
-    return GET_CALL_NAME # Přejdeme do stavu čekání na název
+    if not is_admin(user_id): logger.warning(f"Neoprávněný pokus o /addcall od user {user_id}"); await update.message.reply_text("Tento příkaz může použít pouze administrátor."); return ConversationHandler.END
+    logger.info(f"Admin {user_id} spustil /addcall"); context.user_data['new_call_data'] = {}; await update.message.reply_text("Začínáme přidávat novou výzvu.\nZadej **Název výzvy**:", parse_mode=ParseMode.MARKDOWN); return GET_CALL_NAME
 
 async def get_call_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje název výzvy a zeptá se na popis."""
-    user_id = update.effective_user.id
-    call_name = update.message.text.strip()
-    if not call_name:
-         await update.message.reply_text("Název výzvy nemůže být prázdný. Zadej ho prosím znovu:")
-         return GET_CALL_NAME # Zůstaneme ve stejném stavu
-
-    context.user_data['new_call_data']['name'] = call_name
-    logger.info(f"Admin {user_id} zadal název: {call_name}")
-    await update.message.reply_text("Název uložen. Nyní zadej **Popis výzvy** (můžeš přeskočit pomocí /skip):", parse_mode=ParseMode.MARKDOWN)
-    return GET_CALL_DESC
+    # (kód get_call_name zůstává stejný)
+    user_id = update.effective_user.id; call_name = update.message.text.strip()
+    if not call_name: await update.message.reply_text("Název nemůže být prázdný. Zadej znovu:"); return GET_CALL_NAME
+    context.user_data['new_call_data']['name'] = call_name; logger.info(f"Admin {user_id} zadal název: {call_name}")
+    await update.message.reply_text("Název uložen. Zadej **Popis výzvy** (/skip):", parse_mode=ParseMode.MARKDOWN); return GET_CALL_DESC
 
 async def get_call_desc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje popis výzvy a zeptá se na původní cenu."""
-    user_id = update.effective_user.id
-    description = update.message.text.strip()
-    context.user_data['new_call_data']['description'] = description
-    logger.info(f"Admin {user_id} zadal popis: {description}")
-    await update.message.reply_text("Popis uložen. Nyní zadej **Původní cenu** (nepovinné, zadej jen číslo, např. 450.0 nebo 450, přeskoč pomocí /skip):", parse_mode=ParseMode.MARKDOWN)
-    return GET_CALL_ORIG_PRICE
+    # (kód get_call_desc zůstává stejný)
+    user_id = update.effective_user.id; description = update.message.text.strip()
+    context.user_data['new_call_data']['description'] = description; logger.info(f"Admin {user_id} zadal popis: {description}")
+    await update.message.reply_text("Popis uložen. Zadej **Původní cenu** (číslo nebo /skip):", parse_mode=ParseMode.MARKDOWN); return GET_CALL_ORIG_PRICE
 
 async def get_call_orig_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje původní cenu a zeptá se na cenu po slevě."""
-    user_id = update.effective_user.id
-    price_input = update.message.text.strip()
-    original_price = None
-    try:
-        original_price = float(price_input.replace(',', '.')) # Převedeme na float, povolíme čárku
-        if original_price < 0: raise ValueError("Cena nemůže být záporná.")
-        context.user_data['new_call_data']['original_price'] = original_price
-        logger.info(f"Admin {user_id} zadal původní cenu: {original_price}")
-    except ValueError:
-        await update.message.reply_text("Neplatný formát ceny. Zadej prosím pouze kladné číslo (např. 450 nebo 450.0) nebo /skip:")
-        return GET_CALL_ORIG_PRICE # Zůstaneme ve stejném stavu
-
-    await update.message.reply_text("Původní cena uložena. Nyní zadej **Cenu po slevě** (povinné, pouze číslo, např. 300 nebo 299.9):", parse_mode=ParseMode.MARKDOWN)
-    return GET_CALL_DEAL_PRICE
+    # (kód get_call_orig_price zůstává stejný)
+    user_id = update.effective_user.id; price_input = update.message.text.strip(); original_price = None
+    try: original_price = float(price_input.replace(',', '.'));
+         if original_price < 0: raise ValueError(); context.user_data['new_call_data']['original_price'] = original_price; logger.info(f"Admin {user_id} zadal pův. cenu: {original_price}")
+    except ValueError: await update.message.reply_text("Neplatný formát. Zadej kladné číslo (např. 450.0) nebo /skip:"); return GET_CALL_ORIG_PRICE
+    await update.message.reply_text("Pův. cena uložena. Zadej **Cenu po slevě** (povinné, číslo):", parse_mode=ParseMode.MARKDOWN); return GET_CALL_DEAL_PRICE
 
 async def get_call_deal_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje cenu po slevě a zeptá se na potřebná data."""
-    user_id = update.effective_user.id
-    price_input = update.message.text.strip()
-    try:
-        deal_price = float(price_input.replace(',', '.'))
-        if deal_price <= 0: raise ValueError("Cena po slevě musí být kladná.")
-        context.user_data['new_call_data']['deal_price'] = deal_price
-        logger.info(f"Admin {user_id} zadal cenu po slevě: {deal_price}")
-    except ValueError:
-        await update.message.reply_text("Neplatný formát nebo hodnota ceny. Zadej prosím pouze kladné číslo (např. 300 nebo 299.9):")
-        return GET_CALL_DEAL_PRICE # Zůstaneme ve stejném stavu
-
-    await update.message.reply_text("Cena po slevě uložena. Nyní zadej **Potřebná data od uživatelů** (např. 'adresa doručení, telefonní číslo', odděleno čárkou, přeskoč pomocí /skip):", parse_mode=ParseMode.MARKDOWN)
-    return GET_CALL_DATA_NEEDED
+    # (kód get_call_deal_price zůstává stejný)
+    user_id = update.effective_user.id; price_input = update.message.text.strip()
+    try: deal_price = float(price_input.replace(',', '.'));
+         if deal_price <= 0: raise ValueError(); context.user_data['new_call_data']['deal_price'] = deal_price; logger.info(f"Admin {user_id} zadal cenu po slevě: {deal_price}")
+    except ValueError: await update.message.reply_text("Neplatný formát/hodnota. Zadej kladné číslo (např. 300):"); return GET_CALL_DEAL_PRICE
+    await update.message.reply_text("Cena po slevě uložena. Zadej **Potřebná data** (čárkou oddělená, nebo /skip):", parse_mode=ParseMode.MARKDOWN); return GET_CALL_DATA_NEEDED
 
 async def get_call_data_needed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje potřebná data a zeptá se na finální instrukce."""
-    user_id = update.effective_user.id
-    data_needed = update.message.text.strip()
-    context.user_data['new_call_data']['data_needed'] = data_needed if data_needed else None
-    logger.info(f"Admin {user_id} zadal potřebná data: {data_needed}")
-    await update.message.reply_text("Potřebná data uložena. Nyní zadej **Finální instrukce** pro uživatele po účasti (použij placeholdery jako {user_first_name}, {call_name} atd.):", parse_mode=ParseMode.MARKDOWN)
-    return GET_CALL_FINAL_INST
+    # (kód get_call_data_needed zůstává stejný)
+    user_id = update.effective_user.id; data_needed = update.message.text.strip()
+    context.user_data['new_call_data']['data_needed'] = data_needed if data_needed else None; logger.info(f"Admin {user_id} zadal potřebná data: {data_needed if data_needed else 'Žádná'}")
+    await update.message.reply_text("Potř. data uložena. Zadej **Finální instrukce** (použij {placeholdery}):", parse_mode=ParseMode.MARKDOWN); return GET_CALL_FINAL_INST
 
 async def get_call_final_inst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje finální instrukce a zobrazí shrnutí pro potvrzení."""
-    user_id = update.effective_user.id
-    final_instructions = update.message.text.strip()
-    if not final_instructions:
-         await update.message.reply_text("Finální instrukce nemohou být prázdné. Zadej je prosím znovu:")
-         return GET_CALL_FINAL_INST
-
-    context.user_data['new_call_data']['final_instructions'] = final_instructions
-    logger.info(f"Admin {user_id} zadal finální instrukce.")
-
-    # Sestavení shrnutí
-    call_data = context.user_data['new_call_data']
-    summary = "**Shrnutí nové výzvy:**\n\n"
-    summary += f"*Název:* {call_data.get('name')}\n"
-    summary += f"*Popis:* {call_data.get('description') or '-'}\n"
-    summary += f"*Původní cena:* {call_data.get('original_price') or '-'}\n"
-    summary += f"*Cena po slevě:* {call_data.get('deal_price')}\n"
-    summary += f"*Potřebná data:* {call_data.get('data_needed') or '-'}\n"
-    summary += f"*Finální instrukce:* {call_data.get('final_instructions')}\n"
-    summary += "\n**Chceš tuto výzvu uložit?** (Výzva bude ihned aktivní)"
-
-    reply_keyboard = [[KeyboardButton("Ano, uložit výzvu ✅")], [KeyboardButton("Ne, zrušit")]]
-    markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
-
-    await update.message.reply_text(summary, reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
-    return CONFIRM_ADD_CALL
+    # (kód get_call_final_inst zůstává stejný)
+    user_id = update.effective_user.id; final_instructions = update.message.text.strip()
+    if not final_instructions: await update.message.reply_text("Finální instrukce nesmí být prázdné:"); return GET_CALL_FINAL_INST
+    context.user_data['new_call_data']['final_instructions'] = final_instructions; logger.info(f"Admin {user_id} zadal finální instrukce.")
+    call_data = context.user_data['new_call_data']; summary = "**Shrnutí nové výzvy:**\n\n"; summary += f"*Název:* {call_data.get('name')}\n"; summary += f"*Popis:* {call_data.get('description') or '-'}\n"; summary += f"*Pův. cena:* {call_data.get('original_price', '-')} Kč\n"; summary += f"*Cena po slevě:* {call_data.get('deal_price')} Kč\n"; summary += f"*Potř. data:* {call_data.get('data_needed') or '-'}\n"; summary += f"*Finální instrukce:* _{call_data.get('final_instructions')}_\n"; summary += "\n**Chceš tuto výzvu uložit?**"
+    reply_keyboard = [[KeyboardButton("Ano, uložit výzvu ✅")], [KeyboardButton("Ne, zrušit")]]; markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=True)
+    await update.message.reply_text(summary, reply_markup=markup, parse_mode=ParseMode.MARKDOWN); return CONFIRM_ADD_CALL
 
 async def confirm_add_call(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje potvrzení a uloží výzvu do DB."""
-    user_id = update.effective_user.id
-    response = update.message.text
-
+    # (kód confirm_add_call zůstává stejný)
+    user_id = update.effective_user.id; response = update.message.text
     if "Ano, uložit výzvu" in response:
         call_data = context.user_data.get('new_call_data')
-        if not call_data:
-             await update.message.reply_text("Něco se pokazilo, data pro výzvu nebyla nalezena.", reply_markup=ReplyKeyboardRemove())
-             return ConversationHandler.END
-
-        # Vložení do databáze (status nastavíme na 'active')
-        new_id = add_new_call(
-            name=call_data['name'],
-            description=call_data.get('description'),
-            original_price=call_data.get('original_price'),
-            deal_price=call_data['deal_price'],
-            status='active', # Nové výzvy jsou hned aktivní
-            data_needed=call_data.get('data_needed'),
-            final_instructions=call_data.get('final_instructions')
-            # Ostatní pole jako image_url, start_at, end_at jsou None
-        )
-
-        if new_id:
-            await update.message.reply_text(f"Výzva '{call_data['name']}' byla úspěšně uložena s ID {new_id}!", reply_markup=ReplyKeyboardRemove())
-            logger.info(f"Admin {user_id} uložil novou výzvu ID: {new_id}")
-            # TODO: Možnost odeslat notifikaci o nové výzvě?
-        else:
-            await update.message.reply_text("Nepodařilo se uložit výzvu do databáze.", reply_markup=ReplyKeyboardRemove())
-
-    elif "Ne, zrušit" in response:
-        await update.message.reply_text("Přidání nové výzvy zrušeno.", reply_markup=ReplyKeyboardRemove())
-        logger.info(f"Admin {user_id} zrušil přidání nové výzvy.")
-    else:
-        await update.message.reply_text("Prosím, vyber 'Ano, uložit výzvu ✅' nebo 'Ne, zrušit'.")
-        return CONFIRM_ADD_CALL # Zůstaneme čekat na platnou odpověď
-
-    # Vyčistíme user_data
-    context.user_data.pop('new_call_data', None)
-    return ConversationHandler.END
+        if not call_data: await update.message.reply_text("Chyba: data nenalezena.", reply_markup=ReplyKeyboardRemove()); return ConversationHandler.END
+        new_id = add_new_call(name=call_data['name'], description=call_data.get('description'), original_price=call_data.get('original_price'), deal_price=call_data['deal_price'], status='active', data_needed=call_data.get('data_needed'), final_instructions=call_data.get('final_instructions'))
+        if new_id: await update.message.reply_text(f"Výzva '{call_data['name']}' uložena (ID {new_id})!", reply_markup=ReplyKeyboardRemove()); logger.info(f"Admin {user_id} uložil výzvu ID: {new_id}")
+        else: await update.message.reply_text("Chyba: Uložení do DB selhalo.", reply_markup=ReplyKeyboardRemove())
+    elif "Ne, zrušit" in response: await update.message.reply_text("Přidání zrušeno.", reply_markup=ReplyKeyboardRemove()); logger.info(f"Admin {user_id} zrušil přidání.")
+    else: await update.message.reply_text("Vyber 'Ano' nebo 'Ne'."); return CONFIRM_ADD_CALL
+    context.user_data.pop('new_call_data', None); return ConversationHandler.END
 
 async def skip_optional(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje příkaz /skip pro přeskočení nepovinného údaje."""
+    """Zpracuje /skip pro nepovinné údaje při přidávání výzvy."""
+    # Získání stavu přímo z PTB kontextu (je spolehlivější)
+    # Předpokládá, že používáte PTB v20+
+    current_state = context.user_data.get(ConversationHandler.STATE) if hasattr(context.user_data, 'get') else None
+    # Fallback, pokud by výše nefungovalo (starší PTB nebo jiná struktura)
+    if current_state is None: current_state = context.user_data.get('_internal_conversation_state')
+
     user_id = update.effective_user.id
-    current_state = context.user_data.get('_internal_conversation_state') # Získání aktuálního stavu
     logger.info(f"Admin {user_id} použil /skip ve stavu {current_state}")
 
+    next_state = current_state # Defaultně zůstaneme ve stejném stavu
     if current_state == GET_CALL_DESC:
         context.user_data['new_call_data']['description'] = None
         await update.message.reply_text("Popis přeskočen. Zadej **Původní cenu** (číslo nebo /skip):", parse_mode=ParseMode.MARKDOWN)
-        return GET_CALL_ORIG_PRICE
+        next_state = GET_CALL_ORIG_PRICE
     elif current_state == GET_CALL_ORIG_PRICE:
         context.user_data['new_call_data']['original_price'] = None
-        await update.message.reply_text("Původní cena přeskočena. Zadej **Cenu po slevě** (povinné, číslo):", parse_mode=ParseMode.MARKDOWN)
-        return GET_CALL_DEAL_PRICE
+        await update.message.reply_text("Pův. cena přeskočena. Zadej **Cenu po slevě** (povinné, číslo):", parse_mode=ParseMode.MARKDOWN)
+        next_state = GET_CALL_DEAL_PRICE
     elif current_state == GET_CALL_DATA_NEEDED:
         context.user_data['new_call_data']['data_needed'] = None
-        await update.message.reply_text("Potřebná data přeskočena. Zadej **Finální instrukce**:", parse_mode=ParseMode.MARKDOWN)
-        return GET_CALL_FINAL_INST
+        await update.message.reply_text("Potř. data přeskočena. Zadej **Finální instrukce**:", parse_mode=ParseMode.MARKDOWN)
+        next_state = GET_CALL_FINAL_INST
     else:
-        await update.message.reply_text("Tento údaj nelze přeskočit, nebo příkaz /skip není v tomto kroku podporován.")
-        return current_state # Zůstaneme ve stejném stavu
+        await update.message.reply_text("Tento krok nelze přeskočit příkazem /skip.")
 
-# Společný cancel handler pro všechny konverzace
-async def cancel_all_conversations(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Univerzální cancel, který ukončí jakoukoli konverzaci."""
-    user_id = update.effective_user.id
-    logger.info(f"User {user_id} spustil /cancel.")
-
-    # Ukončíme specifickou konverzaci, pokud běží
-    # (Musíme zkontrolovat klíče specifické pro každou konverzaci)
-    if 'current_call_id' in context.user_data:
-         # Rušíme sběr dat pro účast
-         call_id = context.user_data.get('current_call_id')
-         if call_id:
-              if not add_or_update_participation(user_id=user_id, call_id=call_id, status='cancelled'):
-                   logger.error(f"Nepodařilo se aktualizovat status na 'cancelled' pro user {user_id}, call {call_id}")
-         logger.info(f"User {user_id} zrušil sběr dat pro call {call_id} pomocí /cancel.")
-    elif 'new_call_data' in context.user_data:
-         # Rušíme přidávání výzvy
-         logger.info(f"Admin {user_id} zrušil přidávání nové výzvy pomocí /cancel.")
-    else:
-         logger.info(f"User {user_id} použil /cancel mimo známou konverzaci.")
-
-    # Vyčistíme všechny potenciální konverzační klíče
-    keys_to_clear = ['current_call_id', 'data_needed_list', 'data_needed_index',
-                     'collected_data_so_far', 'current_data_key', 'new_call_data']
-    for key in keys_to_clear:
-        context.user_data.pop(key, None)
-
-    await update.message.reply_text("Aktuální akce byla zrušena.", reply_markup=ReplyKeyboardRemove())
-    return ConversationHandler.END
-
+    return next_state
 
 # --- Handler pro neznámé zprávy ---
 async def handle_unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # (kód handle_unknown_message zůstává stejný)
     text = update.message.text; user_id = update.effective_user.id
-    # Zkontrolujeme, zda uživatel není v některé z konverzací
-    if 'current_data_key' in context.user_data or 'new_call_data' in context.user_data:
-        logger.info(f"User {user_id} poslal '{text}' během konverzace.");
-        await update.message.reply_text("Probíhá jiná akce. Dokonči ji prosím, nebo ji zruš pomocí /cancel.")
-    else:
-        logger.warning(f"Received unknown text message from {user_id} mimo konverzaci: {text}");
-        await update.message.reply_text(f"Promiň, na zprávu '{text}' neumím reagovat. Zkus /help.")
+    if 'current_data_key' in context.user_data or 'new_call_data' in context.user_data: logger.info(f"User {user_id} poslal '{text}' během konverzace."); await update.message.reply_text("Probíhá jiná akce. Dokonči ji prosím, nebo ji zruš pomocí /cancel.")
+    else: logger.warning(f"Received unknown text message from {user_id} mimo konverzaci: {text}"); await update.message.reply_text(f"Promiň, na zprávu '{text}' neumím reagovat. Zkus /help.")
 
 # --- Hlavní funkce ---
 def main() -> None:
     """Spustí bota."""
     try: init_db()
-    except Exception as e: logger.critical(f"Kritická chyba: Inicializace databáze selhala: {e}. Bot se nespustí."); return
+    except Exception as e: logger.critical(f"Kritická chyba DB: {e}. Bot stop."); return
 
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # ConversationHandler pro sběr dat od uživatele
+    # ConversationHandler pro sběr dat účasti
     participation_conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(handle_call_selection, pattern="^call_")],
-        states={
-            PROCESSING_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_data_input)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel_all_conversations)], # Použijeme univerzální cancel
-        name="call_data_collection",
-        # persistent=False # Nechceme ukládat stav mezi restarty
+        states={ PROCESSING_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_data_input)], },
+        fallbacks=[CommandHandler("cancel", cancel_all_conversations)], name="call_data_collection", # Používáme univerzální cancel
     )
 
     # ConversationHandler pro přidání výzvy adminem
@@ -479,33 +445,31 @@ def main() -> None:
             GET_CALL_FINAL_INST: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_call_final_inst)],
             CONFIRM_ADD_CALL: [MessageHandler(filters.Regex("^(Ano, uložit výzvu ✅|Ne, zrušit)$"), confirm_add_call)],
         },
-        fallbacks=[CommandHandler("cancel", cancel_all_conversations)], # Použijeme univerzální cancel
+        fallbacks=[CommandHandler("cancel", cancel_all_conversations)], # Používáme univerzální cancel
         name="add_call_flow",
-        # persistent=False
     )
 
     # --- Registrace handlerů ---
-    application.add_handler(participation_conv_handler) # 1. Konverzace účasti
-    application.add_handler(add_call_conv_handler)      # 2. Konverzace přidání výzvy
+    application.add_handler(participation_conv_handler) # Konverzace účasti
+    application.add_handler(add_call_conv_handler)      # Konverzace přidání výzvy
 
-    # Běžné příkazy - registrujeme až po konverzacích, aby /cancel atd. fungoval správně v konverzacích
+    # Běžné příkazy
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("vyzvy", list_calls))
     application.add_handler(CommandHandler("zrusit_ucast", cancel_participation_start))
     application.add_handler(CommandHandler("moje_ucasti", my_participations_command))
-    application.add_handler(CommandHandler("test", test_command))
+    application.add_handler(CommandHandler("test", test_command)) # Testovací příkaz
 
     # Specifické textové odpovědi
     application.add_handler(MessageHandler(filters.Regex("^(Ano, souhlasím 👍|Ne, děkuji)$"), handle_consent_response))
 
-    # Callback query handlery (musí být po ConversationHandler entry points, pokud by používaly stejný pattern)
+    # Callback query handlery
     application.add_handler(CallbackQueryHandler(handle_cancel_selection, pattern="^cancel_"))
 
     # Handler pro neznámé textové zprávy (až jako poslední)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_unknown_message))
 
-    # Spuštění bota
     logger.info("Spouštím bota (polling)...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
