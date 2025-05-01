@@ -38,6 +38,7 @@ from database import (
 import bot_logic
 
 # --- Logging ---
+# Odsazení 4 mezery
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -68,8 +69,10 @@ def is_admin(user_id: int) -> bool:
 # --- Běžné Handlery ---
 
 
+# Odsazení funkcí 0 mezer
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Odešle uvítací zprávu a žádost o souhlas."""
+    # Odsazení kódu uvnitř funkce 4 mezery
     user = update.effective_user
     user_id = user.id
     first_name = user.first_name or "Uživateli"
@@ -155,31 +158,31 @@ async def list_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     keyboard = []
     reply_markup = None
     if active_calls:
-        for call in active_calls:
-            try:
+        for call in active_calls:  # Odsazení 8
+            try:  # Odsazení 12
                 button = InlineKeyboardButton(
                     f"Mám zájem: {call['name']} ({call['deal_price']} Kč)",
                     callback_data=f"call_{call['call_id']}",
                 )
                 keyboard.append([button])
-            except KeyError as e:
+            except KeyError as e:  # Odsazení 12
                 logger.error(
                     f"Chybějící klíč '{e}' ve 'call' datech při tvorbě tlačítka pro list_calls."
                 )
-            except Exception as e:
+            except Exception as e:  # Odsazení 12
                 logger.error(
                     f"Neočekávaná chyba při tvorbě tlačítka pro list_calls: {e}"
                 )
-        if keyboard:
+        if keyboard:  # Odsazení 8
             reply_markup = InlineKeyboardMarkup(keyboard)
-    try:
+    try:  # Odsazení 4
         await context.bot.send_message(
             chat_id=chat_id,
             text=message_text,
             reply_markup=reply_markup,
             parse_mode=ParseMode.MARKDOWN,
         )
-    except Exception as md_error:
+    except Exception as md_error:  # Odsazení 4
         logger.warning(
             f"Nepodařilo se poslat list_calls s Markdown: {md_error}. Posílám jako prostý text."
         )
@@ -212,19 +215,18 @@ async def handle_call_selection(
 
     next_state = ConversationHandler.END
 
-    try:
+    try:  # Odsazení 4
         call_id = int(callback_data.split("_")[1])
         result = bot_logic.process_call_selection(user_id, call_id, first_name)
 
-        if result["status"] == "error" or result["status"] == "info":
+        if result["status"] == "error" or result["status"] == "info":  # Odsazení 8
             await query.edit_message_text(text=result["message"], reply_markup=None)
             # next_state zůstává END
 
-        elif result["status"] == "ok":
+        elif result["status"] == "ok":  # Odsazení 8
             final_message = result["message"]
             state_code = result.get("next_state")
-            # Používáme Markdown pouze při startu sběru dat
-            use_markdown = state_code == ASKING_DATA
+            use_markdown = state_code == ASKING_DATA  # Jen u potvrzení zájmu
 
             await query.edit_message_text(
                 text=final_message,
@@ -240,51 +242,50 @@ async def handle_call_selection(
             else:  # state_code je -1 nebo None
                 next_state = ConversationHandler.END
                 # Vyčistíme user_data
-                for key in list(context.user_data.keys()):
-                    # Správné odsazení: 16 mezer zde
+                # !! ZKONTROLOVÁNO ODSZAENÍ ZDE !!
+                for key in list(context.user_data.keys()):  # Odsazení 16
                     if key.startswith("current_") or key in [
                         "data_needed_list",
                         "data_needed_index",
                         "collected_data_so_far",
-                    ]:
-                        # Správné odsazení: 20 mezer zde
-                        context.user_data.pop(key, None)
-        else:
+                    ]:  # Odsazení 20
+                        context.user_data.pop(key, None)  # Odsazení 24
+        else:  # Odsazení 8
             logger.error(
                 f"Neznámý status '{result.get('status')}' vrácen z process_call_selection."
             )
             await query.edit_message_text("Nastala neočekávaná chyba.")
             next_state = ConversationHandler.END
 
-        return next_state
+        return next_state  # Odsazení 8
 
-    except (IndexError, ValueError) as e:
+    except (IndexError, ValueError) as e:  # Odsazení 4
         logger.error(
             f"HANDLER: Neplatný formát call_ callback_data: {callback_data} pro user {user_id}. Chyba: {e}"
         )
-        try:  # Odsazení: 8 mezer
+        try:  # Odsazení 8
             await context.bot.send_message(
                 chat_id=query.message.chat_id, text="Chyba při zpracování volby."
             )
-        except Exception as send_e:  # Odsazení: 8 mezer
+        except Exception as send_e:  # Odsazení 8
             logger.error(
                 f"HANDLER: Nepodařilo se odeslat ani chybovou zprávu uživateli {user_id}: {send_e}"
             )
-        return ConversationHandler.END  # Odsazení: 8 mezer
-    except Exception as e:
+        return ConversationHandler.END  # Odsazení 8
+    except Exception as e:  # Odsazení 4
         logger.error(
             f"HANDLER: Neočekávaná chyba při handle_call_selection {callback_data} pro user {user_id}: {e}"
         )
-        try:  # Správné odsazení: 12 mezer
+        try:  # !! ZKONTROLOVÁNO ODSAZENÍ ZDE !! (Odsazení 12)
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text="Neočekávaná chyba při zpracování vaší volby.",
             )
-        except Exception as send_e:  # Odsazení: 12 mezer
+        except Exception as send_e:  # Odsazení 12
             logger.error(
                 f"HANDLER: Nepodařilo se odeslat ani chybovou zprávu uživateli {user_id}: {send_e}"
             )
-        return ConversationHandler.END  # Odsazení: 8 mezer (patří k vnějšímu except)
+        return ConversationHandler.END  # Odsazení 8 (patří k vnějšímu except)
 
 
 async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -377,14 +378,15 @@ async def ask_next_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 chat_id=chat_id, text="Chyba při ukládání údajů."
             )
         # Vyčistíme user_data
-        for key in list(user_data.keys()):  # Odsazení: 8 mezer
+        # !! ZKONTROLOVÁNO ODSAZENÍ ZDE !!
+        for key in list(user_data.keys()):  # Odsazení 8 mezer
             if key.startswith("current_") or key in [
                 "data_needed_list",
                 "data_needed_index",
                 "collected_data_so_far",
-            ]:  # Odsazení: 12 mezer
-                user_data.pop(key, None)  # Odsazení: 16 mezer
-        return ConversationHandler.END  # Odsazení: 8 mezer
+            ]:  # Odsazení 12 mezer
+                user_data.pop(key, None)  # Odsazení 16 mezer
+        return ConversationHandler.END  # Odsazení 8 mezer
     else:
         data_key = needed_list[current_index].strip()
         user_data["current_data_key"] = data_key
@@ -455,7 +457,7 @@ async def process_data_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def cancel_all_conversations(
     update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:  # Přejmenováno
+) -> int:
     """Univerzální cancel, který ukončí jakoukoli konverzaci."""
     user = update.effective_user
     user_data = context.user_data
@@ -483,10 +485,11 @@ async def cancel_all_conversations(
         "current_data_key",
         "new_call_data",
     ]
-    for key in list(user_data.keys()):  # Odsazení 4
-        if key in keys_to_clear:  # Odsazení 8
-            user_data.pop(key, None)  # Odsazení 12
-    return ConversationHandler.END  # Odsazení 4
+    # !! ZKONTROLOVÁNO ODSAZENÍ ZDE !!
+    for key in list(user_data.keys()):  # Odsazení: 4 mezery
+        if key in keys_to_clear:  # Odsazení: 8 mezer
+            user_data.pop(key, None)  # Odsazení: 12 mezer
+    return ConversationHandler.END  # Odsazení: 4 mezery
 
 
 # --- Handlery pro /zrusit_ucast ---
@@ -634,27 +637,22 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 # ==== FUNKCE PRO /addcall ====
-
-
 async def add_call_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Spustí konverzaci pro přidání nové výzvy (jen pro admina)."""
     user_id = update.effective_user.id
     if not is_admin(user_id):
         logger.warning(f"Neoprávněný pokus o /addcall od user {user_id}")
         await update.message.reply_text("Tento příkaz může použít pouze administrátor.")
         return ConversationHandler.END
-
     logger.info(f"Admin {user_id} spustil /addcall")
     context.user_data["new_call_data"] = {}
     await update.message.reply_text(
-        "Začínáme přidávat novou výzvu.\n" "Zadej **Název výzvy**:",
+        "Začínáme přidávat novou výzvu.\nZadej **Název výzvy**:",
         parse_mode=ParseMode.MARKDOWN,
     )
     return GET_CALL_NAME
 
 
 async def get_call_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje název a zeptá se na popis."""
     user_id = update.effective_user.id
     call_name = update.message.text.strip()
     if not call_name:
@@ -663,28 +661,23 @@ async def get_call_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     context.user_data["new_call_data"]["name"] = call_name
     logger.info(f"Admin {user_id} zadal název: {call_name}")
     await update.message.reply_text(
-        "Název uložen. Zadej **Popis výzvy** (/skip pro přeskočení):",
-        parse_mode=ParseMode.MARKDOWN,
+        "Název uložen. Zadej **Popis výzvy** (/skip):", parse_mode=ParseMode.MARKDOWN
     )
     return GET_CALL_DESC
 
 
 async def get_call_desc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje popis a zeptá se na původní cenu."""
     user_id = update.effective_user.id
     description = update.message.text.strip()
-    context.user_data["new_call_data"][
-        "description"
-    ] = description  # Uložíme i prázdný? Skip řešíme jinde
+    context.user_data["new_call_data"]["description"] = description
     logger.info(f"Admin {user_id} zadal popis: {description}")
     await update.message.reply_text(
-        "Popis uložen. Zadej **Původní cenu** (nepovinné, číslo nebo /skip):",
+        "Popis uložen. Zadej **Původní cenu** (číslo nebo /skip):",
         parse_mode=ParseMode.MARKDOWN,
     )
     return GET_CALL_ORIG_PRICE
 
 
-# !! OPRAVENÁ FUNKCE get_call_orig_price !!
 async def get_call_orig_price(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -697,16 +690,15 @@ async def get_call_orig_price(
         if original_price < 0:
             raise ValueError("Cena nemůže být záporná.")
         context.user_data["new_call_data"]["original_price"] = original_price
-        logger.info(f"Admin {user_id} zadal původní cenu: {original_price}")
+        logger.info(f"Admin {user_id} zadal pův. cenu: {original_price}")
     except ValueError:
         await update.message.reply_text(
-            "Neplatný formát ceny. Zadej prosím pouze kladné číslo (např. 450 nebo 450.0) nebo použij /skip pro přeskočení:"
+            "Neplatný formát. Zadej kladné číslo (např. 450.0) nebo /skip:"
         )
-        return GET_CALL_ORIG_PRICE  # Zůstaneme čekat
-
+        return GET_CALL_ORIG_PRICE  # Čekáme na opravu nebo skip
     # Pokračujeme, jen když byla cena OK
     await update.message.reply_text(
-        "Původní cena uložena. Nyní zadej **Cenu po slevě** (povinné, pouze číslo, např. 300 nebo 299.9):",
+        "Pův. cena uložena. Zadej **Cenu po slevě** (povinné, číslo):",
         parse_mode=ParseMode.MARKDOWN,
     )
     return GET_CALL_DEAL_PRICE
@@ -715,7 +707,6 @@ async def get_call_orig_price(
 async def get_call_deal_price(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Zpracuje cenu po slevě a zeptá se na potřebná data."""
     user_id = update.effective_user.id
     price_input = update.message.text.strip()
     try:
@@ -725,12 +716,10 @@ async def get_call_deal_price(
         context.user_data["new_call_data"]["deal_price"] = deal_price
         logger.info(f"Admin {user_id} zadal cenu po slevě: {deal_price}")
     except ValueError:
-        await update.message.reply_text(
-            "Neplatný formát/hodnota. Zadej kladné číslo (např. 300):"
-        )
+        await update.message.reply_text("Neplatný formát/hodnota. Zadej kladné číslo:")
         return GET_CALL_DEAL_PRICE
     await update.message.reply_text(
-        "Cena po slevě uložena. Zadej **Potřebná data** (čárkou oddělená, např. 'adresa, email', nebo /skip):",
+        "Cena po slevě uložena. Zadej **Potřebná data** (čárkou oddělená, nebo /skip):",
         parse_mode=ParseMode.MARKDOWN,
     )
     return GET_CALL_DATA_NEEDED
@@ -739,7 +728,6 @@ async def get_call_deal_price(
 async def get_call_data_needed(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Zpracuje potřebná data a zeptá se na finální instrukce."""
     user_id = update.effective_user.id
     data_needed = update.message.text.strip()
     context.user_data["new_call_data"]["data_needed"] = (
@@ -758,7 +746,6 @@ async def get_call_data_needed(
 async def get_call_final_inst(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
-    """Zpracuje finální instrukce a zobrazí shrnutí."""
     user_id = update.effective_user.id
     final_instructions = update.message.text.strip()
     if not final_instructions:
@@ -789,7 +776,6 @@ async def get_call_final_inst(
 
 
 async def confirm_add_call(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Zpracuje potvrzení a uloží výzvu."""
     user_id = update.effective_user.id
     response = update.message.text
     if "Ano, uložit výzvu" in response:
@@ -832,12 +818,10 @@ async def confirm_add_call(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def skip_optional(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Zpracuje /skip pro nepovinné údaje při přidávání výzvy."""
-    # Získání stavu přímo z PTB kontextu
     current_state = context.user_data.get(ConversationHandler.STATE)
     user_id = update.effective_user.id
     logger.info(f"Admin {user_id} použil /skip ve stavu {current_state}")
-
-    next_state = current_state  # Defaultně zůstaneme
+    next_state = current_state
     if current_state == GET_CALL_DESC:
         context.user_data["new_call_data"]["description"] = None
         await update.message.reply_text(
@@ -947,14 +931,11 @@ def main() -> None:
         },
         fallbacks=[CommandHandler("cancel", cancel_all_conversations)],
         name="add_call_flow",
-        # Ukládání stavu konverzace do context.user_data (pro /skip)
-        persistent=False,  # Pokud bychom chtěli persistentní, museli bychom řešit ukládání user_data
-        # map_to_parent={ConversationHandler.END: ConversationHandler.END} # Pro vnořené konverzace, zde není potřeba
     )
 
     # --- Registrace handlerů ---
     application.add_handler(participation_conv_handler)
-    application.add_handler(add_call_conv_handler)  # Přidán handler pro /addcall
+    application.add_handler(add_call_conv_handler)
 
     # Běžné příkazy
     application.add_handler(CommandHandler("start", start))
