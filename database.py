@@ -3,14 +3,15 @@ import sqlite3
 import datetime
 import logging
 import json
-import os
+import os  # Potřebujeme pro absolutní cestu
 
+# --- Určení absolutní cesty k databázi ---
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_FILE = os.path.join(_BASE_DIR, "database.sqlite3")
 
+# Nastavení loggeru
 logger = logging.getLogger(__name__)
-# Logování cesty pro kontrolu při startu
-logger.info(f"Database path set to: {DATABASE_FILE}")
+logger.info(f"Database path set to: {DATABASE_FILE}")  # Logování cesty pro kontrolu
 
 
 def get_db_connection():
@@ -26,33 +27,86 @@ def get_db_connection():
         raise
 
 
+# !! OPRAVENÁ VERZE init_db !!
 def init_db():
     """Inicializuje databázi a vytvoří tabulky, pokud neexistují."""
+    conn = None  # Inicializace pro finally blok
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Tabulky users, calls, participations (zůstávají stejné jako v poslední verzi)
+
+        # Tabulka uživatelů
+        # Použití trojitých uvozovek a standardní SQL syntaxe
         cursor.execute(
-            """CREATE TABLE IF NOT EXISTS users (...)"""
-        )  # Zkráceno pro přehlednost
+            """
+        CREATE TABLE IF NOT EXISTS users (
+            telegram_id INTEGER PRIMARY KEY,
+            first_name TEXT,
+            last_name TEXT,
+            username TEXT,
+            consent_status TEXT DEFAULT 'pending',
+            state TEXT DEFAULT 'start',
+            joined_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        )  # Ukončeno středníkem pro přehlednost
         logger.info("Tabulka 'users' zkontrolována/vytvořena.")
+
+        # Tabulka Calls (Výzvy)
         cursor.execute(
-            """CREATE TABLE IF NOT EXISTS calls (...)"""
-        )  # Zkráceno pro přehlednost
+            """
+        CREATE TABLE IF NOT EXISTS calls (
+            call_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            original_price REAL,
+            deal_price REAL NOT NULL,
+            status TEXT DEFAULT 'active',
+            data_needed TEXT,
+            image_url TEXT,
+            start_at DATETIME,
+            end_at DATETIME,
+            final_instructions TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        )  # Ukončeno středníkem
         logger.info("Tabulka 'calls' zkontrolována/vytvořena.")
+
+        # Tabulka Participations (Účasti)
+        # Pečlivá kontrola syntaxe FOREIGN KEY a UNIQUE
         cursor.execute(
-            """CREATE TABLE IF NOT EXISTS participations (...)"""
-        )  # Zkráceno pro přehlednost
+            """
+        CREATE TABLE IF NOT EXISTS participations (
+            participation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            call_id INTEGER NOT NULL,
+            status TEXT DEFAULT 'interested',
+            collected_data TEXT,
+            participation_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (telegram_id) ON DELETE CASCADE,
+            FOREIGN KEY (call_id) REFERENCES calls (call_id) ON DELETE CASCADE,
+            UNIQUE(user_id, call_id)
+        );
+        """
+        )  # Ukončeno středníkem
         logger.info("Tabulka 'participations' zkontrolována/vytvořena.")
-        conn.commit()
-        conn.close()
+
+        conn.commit()  # Potvrdíme všechny změny
         logger.info("Inicializace databáze dokončena.")
+
     except sqlite3.Error as e:
         logger.error(f"Chyba během inicializace DB: {e}")
-        raise
+        # Pokud nastane chyba, nemá smysl pokračovat
+        if conn:
+            conn.rollback()  # Vrátíme případné částečné změny
+        raise  # Znovu vyvoláme výjimku, aby ji zachytil main a ukončil bota
+    finally:
+        if conn:
+            conn.close()  # Vždy uzavřeme spojení
 
 
-# --- Funkce pro práci s DB ---
+# --- Ostatní Funkce pro práci s DB (zůstávají stejné) ---
 
 
 def get_active_calls():
@@ -89,7 +143,7 @@ def get_call_details(call_id: int):
 
 
 def update_user_consent(user_id: int, consent_status: str):
-    # (kód update_user_consent zůstává stejný)
+    """Aktualizuje stav souhlasu uživatele."""
     allowed_statuses = ["pending", "granted", "denied"]
     if consent_status not in allowed_statuses:
         logger.error(
@@ -115,7 +169,7 @@ def update_user_consent(user_id: int, consent_status: str):
 
 
 def add_or_update_user(user_id: int, first_name: str, last_name: str, username: str):
-    # (kód add_or_update_user zůstává stejný)
+    """Přidá nebo aktualizuje uživatele."""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -135,7 +189,7 @@ def add_or_update_user(user_id: int, first_name: str, last_name: str, username: 
 def add_or_update_participation(
     user_id: int, call_id: int, status: str, collected_data: dict = None
 ):
-    # (kód add_or_update_participation zůstává stejný)
+    """Přidá nebo aktualizuje účast uživatele ve výzvě (ukládá data jako JSON)."""
     allowed_statuses = ["interested", "data_collected", "confirmed", "cancelled"]
     data_json = None
     if status not in allowed_statuses:
@@ -170,7 +224,7 @@ def add_or_update_participation(
 
 
 def get_participation(user_id: int, call_id: int):
-    # (kód get_participation zůstává stejný)
+    """Načte detaily účasti a převede collected_data z JSON na slovník."""
     participation = None
     try:
         conn = get_db_connection()
@@ -202,7 +256,7 @@ def get_participation(user_id: int, call_id: int):
 
 
 def get_user_active_participations(user_id: int):
-    # (kód get_user_active_participations zůstává stejný)
+    """Načte aktivní účasti uživatele a připojí název výzvy."""
     participations = []
     try:
         conn = get_db_connection()
@@ -221,7 +275,6 @@ def get_user_active_participations(user_id: int):
         return []
 
 
-# --- NOVÁ FUNKCE PRO PŘIDÁNÍ VÝZVY ---
 def add_new_call(
     name: str,
     description: str | None,
@@ -240,13 +293,7 @@ def add_new_call(
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            """
-            INSERT INTO calls (
-                name, description, original_price, deal_price, status,
-                data_needed, image_url, start_at, end_at, final_instructions
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
+            "INSERT INTO calls (name, description, original_price, deal_price, status, data_needed, image_url, start_at, end_at, final_instructions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
                 description,
@@ -261,14 +308,13 @@ def add_new_call(
             ),
         )
         conn.commit()
-        new_call_id = cursor.lastrowid  # Získáme ID právě vloženého řádku
+        new_call_id = cursor.lastrowid
         logger.info(f"Nová výzva '{name}' úspěšně vložena s ID: {new_call_id}")
-        conn.close()  # Zavřeme spojení až po úspěšném commitu a získání ID
+        conn.close()
         return new_call_id
     except sqlite3.Error as e:
         logger.error(f"Chyba při vkládání nové výzvy '{name}': {e}")
         if conn:
-            conn.rollback()  # Vrátíme změny v případě chyby
-            conn.close()  # Zavřeme spojení i v případě chyby
+            conn.rollback()
+            conn.close()
         return None
-    # Není potřeba finally block, pokud conn zavíráme v try i except
