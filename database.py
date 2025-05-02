@@ -1,9 +1,10 @@
 # database.py
+# -*- coding: utf-8 -*-
 import sqlite3
 import datetime
 import logging
 import json
-import os  # Potřebujeme pro absolutní cestu
+import os
 
 # --- Určení absolutní cesty k databázi ---
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,7 +28,6 @@ def get_db_connection():
         raise
 
 
-# !! OPRAVENÁ VERZE init_db !!
 def init_db():
     """Inicializuje databázi a vytvoří tabulky, pokud neexistují."""
     conn = None  # Inicializace pro finally blok
@@ -36,7 +36,6 @@ def init_db():
         cursor = conn.cursor()
 
         # Tabulka uživatelů
-        # Použití trojitých uvozovek a standardní SQL syntaxe
         cursor.execute(
             """
         CREATE TABLE IF NOT EXISTS users (
@@ -49,7 +48,7 @@ def init_db():
             joined_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         """
-        )  # Ukončeno středníkem pro přehlednost
+        )
         logger.info("Tabulka 'users' zkontrolována/vytvořena.")
 
         # Tabulka Calls (Výzvy)
@@ -70,11 +69,10 @@ def init_db():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         """
-        )  # Ukončeno středníkem
+        )
         logger.info("Tabulka 'calls' zkontrolována/vytvořena.")
 
         # Tabulka Participations (Účasti)
-        # Pečlivá kontrola syntaxe FOREIGN KEY a UNIQUE
         cursor.execute(
             """
         CREATE TABLE IF NOT EXISTS participations (
@@ -89,7 +87,7 @@ def init_db():
             UNIQUE(user_id, call_id)
         );
         """
-        )  # Ukončeno středníkem
+        )
         logger.info("Tabulka 'participations' zkontrolována/vytvořena.")
 
         conn.commit()  # Potvrdíme všechny změny
@@ -97,7 +95,6 @@ def init_db():
 
     except sqlite3.Error as e:
         logger.error(f"Chyba během inicializace DB: {e}")
-        # Pokud nastane chyba, nemá smysl pokračovat
         if conn:
             conn.rollback()  # Vrátíme případné částečné změny
         raise  # Znovu vyvoláme výjimku, aby ji zachytil main a ukončil bota
@@ -106,7 +103,7 @@ def init_db():
             conn.close()  # Vždy uzavřeme spojení
 
 
-# --- Ostatní Funkce pro práci s DB (zůstávají stejné) ---
+# --- Funkce pro práci s DB ---
 
 
 def get_active_calls():
@@ -126,6 +123,33 @@ def get_active_calls():
     except sqlite3.Error as e:
         logger.error(f"Chyba při načítání aktivních výzev: {e}")
         return []
+
+
+# --- NOVÁ FUNKCE ---
+def get_all_calls():
+    """Načte všechny výzvy z databáze bez ohledu na status."""
+    calls = []  # Defaultní hodnota pro případ chyby
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # Vybereme ID, jméno a status, seřadíme podle ID nebo data vytvoření
+        cursor.execute(
+            """
+            SELECT call_id, name, status, created_at
+            FROM calls
+            ORDER BY call_id DESC
+        """
+        )
+        calls = cursor.fetchall()
+        conn.close()
+        logger.info(f"DEBUG get_all_calls: Načteno řádků: {len(calls)}")
+        return calls  # Vrátí seznam sqlite3.Row objektů
+    except sqlite3.Error as e:
+        logger.error(f"Chyba při načítání všech výzev: {e}")
+        return []  # Vrátíme prázdný seznam v případě chyby
+
+
+# --------------------
 
 
 def get_call_details(call_id: int):
@@ -317,4 +341,4 @@ def add_new_call(
         if conn:
             conn.rollback()
             conn.close()
-        return None
+            return None
